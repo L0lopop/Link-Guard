@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.png" width="128" alt="Link Guard">
+</p>
+
 # Link Guard
 
 Плагин для **exteraGram** и **AyuGram**: разбирает ссылку до того, как вы по ней перейдёте, и вычищает трекеры.
