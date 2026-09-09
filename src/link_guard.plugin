@@ -83,7 +83,7 @@ STRINGS = {
         "hdr_checks": "Проверка ссылок",
         "sw_check": "Проверять перед открытием",
         "sw_check_sub": "Разбирает адрес до перехода и предупреждает о подозрительном",
-        "sel_mode": "Когда показывать разбор",
+        "sel_mode": "Показывать разбор",
         "mode_suspicious": "Только при подозрении",
         "mode_always": "Для каждой ссылки",
         "sw_expand": "Разворачивать короткие ссылки",
@@ -100,30 +100,30 @@ STRINGS = {
         "in_whitelist_sub": "Впишите адрес и нажмите «Добавить»",
         "btn_add": "Добавить",
         "hold_to_delete": "Зажмите, чтобы удалить",
-        "empty_list": "Пока пусто — проверяются все домены",
+        "empty_list": "Список пуст",
+        "empty_list_sub": "Проверяются все домены",
         "del_title": "Убрать из исключений?",
         "del_body": "%s снова будет проверяться перед открытием.",
         "btn_delete": "Удалить",
         "toast_added": "%s добавлен в исключения",
         "toast_removed": "%s снова проверяется",
         "toast_bad_domain": "Не похоже на домен",
-        "tags_note": "Метки — это хвосты вроде utm_source, fbclid и yclid. По ним рекламные сети "
-                     "узнают, откуда вы пришли и кто прислал вам ссылку, а сам адрес без них "
-                     "работает так же. Плагин срезает их перед открытием.",
-        "sw_notify_clean": "Сообщать о вырезанных метках",
-        "sw_notify_clean_sub": "Короткое уведомление при переходе, если из адреса что-то убрано",
+        "tags_title": "Что такое метки",
+        "tags_note": "utm_source, fbclid и подобные хвосты сообщают рекламным сетям, откуда вы "
+                     "пришли и кто дал вам ссылку. Без них адрес работает так же.",
         "toast_cleaned": "Убрано меток слежения: %s",
         "hdr_stats": "Статистика",
-        "stats_line": "Вырезано меток: %s · Предупреждений: %s",
-        "stats_reset": "Сбросить счётчики",
+        "stats_line": "Вырезано меток: %s",
+        "stats_sub": "Предупреждений: %s · нажмите, чтобы сбросить",
         "stats_done": "Счётчики сброшены",
         "hdr_updates": "Обновления",
         "sw_updates": "Проверять обновления",
         "sw_updates_sub": "Раз в сутки сверяет версию с репозиторием на GitHub",
         "btn_check_now": "Проверить сейчас",
         "version_line": "Версия %s",
-        "privacy_note": "Проверка ссылок идёт на устройстве. Сеть используется только для "
-                        "разворачивания коротких ссылок и проверки обновлений — оба тумблера выключаются.",
+        "privacy_title": "Как это работает",
+        "privacy_note": "Ссылки разбираются на устройстве. Сеть нужна только для коротких ссылок "
+                        "и проверки обновлений — оба тумблера выключаются.",
         "menu_check": "Проверить ссылки",
         "menu_copy": "Копировать без трекеров",
         "title_danger": "⛔ Опасная ссылка",
@@ -192,7 +192,7 @@ STRINGS = {
         "hdr_checks": "Link checks",
         "sw_check": "Check before opening",
         "sw_check_sub": "Inspects the address before you follow it and warns about anything odd",
-        "sel_mode": "When to show the breakdown",
+        "sel_mode": "Show breakdown",
         "mode_suspicious": "Only when suspicious",
         "mode_always": "For every link",
         "sw_expand": "Expand short links",
@@ -209,30 +209,30 @@ STRINGS = {
         "in_whitelist_sub": "Type an address and tap «Add»",
         "btn_add": "Add",
         "hold_to_delete": "Long-press to remove",
-        "empty_list": "Empty — every domain is checked",
+        "empty_list": "The list is empty",
+        "empty_list_sub": "Every domain is checked",
         "del_title": "Remove from exceptions?",
         "del_body": "%s will be checked before opening again.",
         "btn_delete": "Remove",
         "toast_added": "%s added to exceptions",
         "toast_removed": "%s is checked again",
         "toast_bad_domain": "That does not look like a domain",
-        "tags_note": "Tags are tails such as utm_source, fbclid and yclid. Ad networks use them to "
-                     "learn where you came from and who sent you the link; the address works the "
-                     "same without them. The plugin strips them before opening.",
-        "sw_notify_clean": "Notify about stripped tags",
-        "sw_notify_clean_sub": "A short notice on opening when something was removed from the address",
+        "tags_title": "What tags are",
+        "tags_note": "utm_source, fbclid and similar tails tell ad networks where you came from "
+                     "and who gave you the link. The address works the same without them.",
         "toast_cleaned": "Tracking tags removed: %s",
         "hdr_stats": "Statistics",
-        "stats_line": "Tags removed: %s · Warnings shown: %s",
-        "stats_reset": "Reset counters",
+        "stats_line": "Tags removed: %s",
+        "stats_sub": "Warnings: %s · tap to reset",
         "stats_done": "Counters reset",
         "hdr_updates": "Updates",
         "sw_updates": "Check for updates",
         "sw_updates_sub": "Compares the version with the GitHub repository once a day",
         "btn_check_now": "Check now",
         "version_line": "Version %s",
-        "privacy_note": "Link analysis runs on your device. The network is used only to expand "
-                        "short links and to check for updates — both can be switched off.",
+        "privacy_title": "How it works",
+        "privacy_note": "Links are analysed on your device. The network is only used for short "
+                        "links and update checks — both can be switched off.",
         "menu_check": "Check links",
         "menu_copy": "Copy without trackers",
         "title_danger": "⛔ Dangerous link",
@@ -391,6 +391,7 @@ _RISK_ORDER = {INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3}
 CACHE_TTL = 300.0
 CACHE_MAX = 200
 ANCHOR_MAX = 300
+COUNT_WINDOW = 5.0
 
 
 class Verdict:
@@ -725,6 +726,7 @@ class LinkGuardPlugin(BasePlugin):
         self._menu_check = self._menu_copy = None
         self._browser_cls = None
         self._progress = None
+        self._counted = {}
 
         self._install_open_url_hook()
         self._install_update_hook()
@@ -791,11 +793,10 @@ class LinkGuardPlugin(BasePlugin):
         ] + self._exception_rows() + [
 
             Header(text=t("hdr_stats")),
-            Text(text=t("stats_line", self._stat("stats_cleaned"), self._stat("stats_warned")),
-                 subtext=t("stats_reset"), on_click=self._on_reset_stats_click),
-            Text(text=t("tags_note")),
-            Switch(key="notify_clean", text=t("sw_notify_clean"), default=False,
-                   subtext=t("sw_notify_clean_sub")),
+            Text(text=t("stats_line", self._stat("stats_cleaned")),
+                 subtext=t("stats_sub", self._stat("stats_warned")),
+                 on_click=self._on_reset_stats_click),
+            Text(text=t("tags_title"), subtext=t("tags_note")),
 
             Header(text=t("hdr_updates")),
             Switch(key="check_updates", text=t("sw_updates"), default=True,
@@ -808,7 +809,7 @@ class LinkGuardPlugin(BasePlugin):
                    subtext=t("sw_debug_sub")),
 
             Divider(),
-            Text(text=t("privacy_note")),
+            Text(text=t("privacy_title"), subtext=t("privacy_note")),
         ]
 
     def _exception_rows(self):
@@ -820,8 +821,9 @@ class LinkGuardPlugin(BasePlugin):
                                  on_click=self._make_hint(),
                                  on_long_click=self._make_remove(domain)))
         else:
-            rows.append(Text(text=t("empty_list")))
-        rows.append(Input(key="whitelist_add", text=t("in_whitelist"), default="",
+            rows.append(Text(text=t("empty_list"), subtext=t("empty_list_sub")))
+        rows.append(Input(key="whitelist_add", text=t("in_whitelist"),
+                          default=self.get_setting("whitelist_add", "") or "",
                           subtext=t("in_whitelist_sub")))
         rows.append(Text(text=t("btn_add"), accent=True, on_click=self._on_add_domain))
         return rows
@@ -896,6 +898,19 @@ class LinkGuardPlugin(BasePlugin):
             return int(self.get_setting(key, 0) or 0)
         except (TypeError, ValueError):
             return 0
+
+    def _count_once(self, url):
+        seen = getattr(self, "_counted", None)
+        if seen is None:
+            seen = self._counted = {}
+        now = time.monotonic()
+        for key, moment in list(seen.items()):
+            if now - moment > COUNT_WINDOW:
+                seen.pop(key, None)
+        if url in seen:
+            return False
+        seen[url] = now
+        return True
 
     def _bump(self, key, amount=1):
         if amount:
@@ -1192,10 +1207,10 @@ class LinkGuardPlugin(BasePlugin):
         if not needs_dialog:
             if clean_on_open and verdict.cleaned != url:
                 if self._replace_url_arg(param.args, index, verdict.cleaned):
-                    removed = len(verdict.removed_params)
+                    removed = len(verdict.removed_params) if self._count_once(url) else 0
                     self._bump("stats_cleaned", removed)
                     self._debug("cleaned -> %s" % verdict.cleaned)
-                    if removed and self.get_setting("notify_clean", False):
+                    if removed:
                         run_on_ui_thread(lambda: self._toast(t("toast_cleaned", removed)))
                 else:
                     self._debug("не удалось подставить очищенный адрес")

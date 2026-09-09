@@ -506,6 +506,29 @@ check("после подтверждения домен удалён", plugin._w
 plugin.set_setting("whitelist", "")
 plugin._cache.clear()
 
+plugin.set_setting("whitelist", "")
+plugin.set_setting("whitelist_add", "ozon.ru")
+plugin._on_add_domain()
+add_row = [r for r in plugin._exception_rows() if getattr(r, "key", "") == "whitelist_add"][0]
+check("поле ввода очищается и в отрисовке", add_row.default == "", add_row.default)
+plugin.set_setting("whitelist", "")
+
+print("\nДвойной вызов хука не задваивает счётчик")
+if handler is not None:
+    plugin.set_setting("stats_cleaned", 0)
+    plugin._counted.clear()
+    dirty = "https://shop.example.com/dup?utm_source=a&fbclid=b"
+    handler.before_hooked_method(FakeParam(dirty))
+    first = plugin._stat("stats_cleaned")
+    handler.before_hooked_method(FakeParam(dirty))
+    check("вторая перегрузка не считается заново",
+          plugin._stat("stats_cleaned") == first == 2, (first, plugin._stat("stats_cleaned")))
+
+    plugin._counted.clear()
+    handler.before_hooked_method(FakeParam("https://shop.example.com/other?utm_source=a"))
+    check("другая ссылка считается", plugin._stat("stats_cleaned") == 3,
+          plugin._stat("stats_cleaned"))
+
 print("\nСброс счётчиков")
 plugin.set_setting("stats_cleaned", 7)
 plugin.set_setting("stats_warned", 3)
