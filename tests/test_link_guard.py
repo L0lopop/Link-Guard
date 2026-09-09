@@ -24,9 +24,11 @@ def _stub(name, **attrs):
 
 
 class FakeDialog:
-    """Повторяет AlertDialogBuilder ровно настолько, чтобы поймать ошибки вызова."""
 
     last = None
+    ALERT_TYPE_MESSAGE = 0
+    ALERT_TYPE_LOADING = 1
+    ALERT_TYPE_SPINNER = 2
 
     def __init__(self, activity, progress_style=None):
         FakeDialog.last = self
@@ -46,6 +48,12 @@ class FakeDialog:
     def set_negative_button(self, text, callback):
         self.buttons["negative"] = (text, callback)
 
+    def set_neutral_button(self, text, callback):
+        self.buttons["neutral"] = (text, callback)
+
+    def set_cancelable(self, value):
+        self.cancelable = value
+
     def show(self):
         self.shown = True
 
@@ -57,7 +65,6 @@ class FakeDialog:
 
 
 class FakeMethod:
-    """java.lang.reflect.Method: считаем повторные вызовы openUrl."""
 
     def __init__(self):
         self.calls = []
@@ -66,11 +73,32 @@ class FakeMethod:
         self.calls.append(args)
 
 
+class FakeUri:
+
+    def __init__(self, value):
+        self.value = str(value)
+
+    def getScheme(self):
+        return self.value.split(":", 1)[0]
+
+    def __str__(self):
+        return self.value
+
+
+class FakeContext:
+    started = []
+
+    def getPackageName(self):
+        return "org.telegram.messenger"
+
+    def startActivity(self, intent):
+        FakeContext.started.append(intent)
+
+
 class FakeParam:
-    """Аналог param из Xposed-хука."""
 
     def __init__(self, url):
-        self.args = [object(), url]
+        self.args = [FakeContext(), url]
         self.method = FakeMethod()
         self.cancelled = False
 
@@ -78,19 +106,31 @@ class FakeParam:
         self.cancelled = True
 
 
+SENT_DOCUMENTS = []
+
+
 def install_stubs():
     hooks_installed = []
+
+    update_hooks = []
 
     class BasePlugin:
         def __init__(self):
             self._settings = {}
             self.installed_hooks = hooks_installed
+            self.update_hooks = update_hooks
+            self.reloaded = False
+
+        def add_hook(self, name, match_substring=False, priority=0):
+            update_hooks.append(name)
 
         def get_setting(self, key, default=None):
             return self._settings.get(key, default)
 
         def set_setting(self, key, value, reload_settings=False):
             self._settings[key] = value
+            if reload_settings:
+                self.reloaded = True
 
         def add_menu_item(self, data):
             return data
@@ -109,8 +149,6 @@ def install_stubs():
             pass
 
     class MethodHook:
-        # Настоящий MethodHook — обычный класс без конструктора: любой аргумент
-        # при создании даёт TypeError. Заглушка обязана вести себя так же.
         pass
 
     class HookResult:
@@ -141,15 +179,27 @@ def install_stubs():
     _stub("ui.alert", AlertDialogBuilder=FakeDialog)
 
     fragment = types.SimpleNamespace(getParentActivity=lambda: object())
+    sent_documents = SENT_DOCUMENTS
     _stub("client_utils", get_last_fragment=lambda: fragment,
-          run_on_queue=lambda fn, *a, **kw: fn())
+          run_on_queue=lambda fn, *a, **kw: fn(),
+          send_document=lambda peer, path, caption=None: sent_documents.append((peer, path)),
+          get_user_config=lambda *a: types.SimpleNamespace(getClientUserId=lambda: 42))
+    _stub("file_utils", get_plugins_dir=lambda: "/tmp/plugins",
+          get_cache_dir=lambda: "/tmp/cache",
+          get_documents_dir=lambda: "/tmp/docs",
+          ensure_dir_exists=lambda path: None,
+          write_file_bytes=lambda path, data: None)
     _stub("android_utils", log=lambda *a: None, run_on_ui_thread=lambda f, d=0: f(),
           copy_to_clipboard=lambda t: None)
-    _stub("hook_utils", find_class=lambda name: types.SimpleNamespace(name=name))
+    def fake_find_class(name):
+        if name.endswith("Uri"):
+            return types.SimpleNamespace(name=name, parse=FakeUri)
+        return types.SimpleNamespace(name=name)
+
+    _stub("hook_utils", find_class=fake_find_class)
 
 
 def install_minimal_stubs():
-    """SDK старого клиента: есть только базовый набор, без меню, хуков и UI."""
     for name in ("base_plugin", "ui", "ui.settings", "ui.alert",
                  "client_utils", "android_utils", "hook_utils"):
         sys.modules.pop(name, None)
@@ -218,7 +268,7 @@ check("опечатка в бренде поймана", v.risk == lg.HIGH, v.fl
 v = lg.analyze("https://sberbank.ru.pay-secure.xyz/enter")
 check("бренд в поддомене пойман", v.risk == lg.HIGH, v.flags)
 
-v = lg.analyze("https://sbеrbank.ru/")  # кириллическая 'е'
+v = lg.analyze("https://sbеrbank.ru/")
 check("кириллическая подмена поймана", v.risk == lg.HIGH, v.flags)
 
 v = lg.analyze("javascript:alert(1)")
@@ -245,7 +295,6 @@ for good in ("https://t.me/durov",
 v = lg.analyze("https://gosuslugi.ru/login", whitelist={"gosuslugi.ru"})
 check("белый список работает", not v.flags, v.flags)
 
-# Регрессии на ложные срабатывания.
 v = lg.analyze("https://mail.google.com/mail/u/0/")
 check("поддомен своего же бренда не ругается", not v.suspicious, v.flags)
 v = lg.analyze("https://online.sberbank.ru/CSAFront/index.do")
@@ -278,15 +327,21 @@ if handler is not None:
     check("опасный переход остановлен", param.cancelled)
     check("показан диалог с предупреждением",
           FakeDialog.last is not None and FakeDialog.last.shown
-          and "Опасная" in (FakeDialog.last.title or ""),
+          and FakeDialog.last.title == lg.t("title_danger"),
           FakeDialog.last.title if FakeDialog.last else None)
-    check("в диалоге есть кнопка отмены", "negative" in FakeDialog.last.buttons)
+    check("на опасной ссылке главная кнопка — отмена",
+          FakeDialog.last.buttons["positive"][0] == lg.t("btn_cancel"),
+          FakeDialog.last.buttons["positive"][0])
+    check("переход спрятан во вторую кнопку",
+          FakeDialog.last.buttons["negative"][0] == lg.t("btn_open"))
+    check("доверять опасному домену одним тапом нельзя",
+          "neutral" not in FakeDialog.last.buttons)
 
 if handler is not None:
     print("\nПовторный вызов после одобрения")
     param = FakeParam("https://gosuslugi.ru.verify.cyou/enter")
     handler.before_hooked_method(param)
-    FakeDialog.last.press("positive")
+    FakeDialog.last.press("negative")
     check("после «Открыть» ссылка переоткрыта", len(param.method.calls) == 1,
           param.method.calls)
 
@@ -294,7 +349,7 @@ if handler is not None:
     handler.before_hooked_method(nested)
     check("вложенная перегрузка не поднимает второй диалог", not nested.cancelled)
 
-    plugin.APPROVAL_WINDOW = -1  # одобрение просрочено
+    plugin.APPROVAL_WINDOW = -1
     again = FakeParam("https://gosuslugi.ru.verify.cyou/enter")
     handler.before_hooked_method(again)
     check("по истечении окна проверка снова работает", again.cancelled)
@@ -316,6 +371,285 @@ if handler is not None:
     handler.before_hooked_method(param)
     check("схема не дописана в аргумент", param.args[1] == "www.example.com",
           param.args[1])
+
+print("\nЛокализация")
+missing_en = [k for k in lg.STRINGS["ru"] if k not in lg.STRINGS["en"]]
+missing_ru = [k for k in lg.STRINGS["en"] if k not in lg.STRINGS["ru"]]
+check("наборы строк совпадают по ключам", not missing_en and not missing_ru,
+      missing_en + missing_ru)
+saved_lang = lg.LANG
+lg.LANG = "en"
+check("английские строки подставляются", lg.t("btn_open") == "Open", lg.t("btn_open"))
+check("подстановка аргументов работает", "42" in lg.t("f_port", 42), lg.t("f_port", 42))
+lg.LANG = "xx"
+check("неизвестный язык падает на английский", lg.t("btn_cancel") == "Cancel")
+lg.LANG = saved_lang
+
+print("\nПодпись ссылки не совпадает с адресом")
+check("домен из подписи", lg.anchor_domain("sberbank.ru") == "sberbank.ru")
+check("домен из подписи со схемой", lg.anchor_domain("https://vk.com/feed") == "vk.com")
+check("обычный текст подписью не считается", lg.anchor_domain("нажми сюда") == "")
+check("многоточие не домен", lg.anchor_domain("...") == "")
+
+v = lg.analyze("https://pay-now.top/enter", anchor="sberbank.ru")
+check("подмена подписи поймана", v.risk == lg.HIGH, v.flags)
+v = lg.analyze("https://sberbank.ru/enter", anchor="sberbank.ru")
+check("совпадающая подпись не тревожит", not v.suspicious, v.flags)
+v = lg.analyze("https://online.sberbank.ru/enter", anchor="sberbank.ru")
+check("поддомен того же сайта не тревожит", not v.suspicious, v.flags)
+v = lg.analyze("https://example.com/a", anchor="нажми сюда")
+check("текстовая подпись не тревожит", not v.suspicious, v.flags)
+
+check("подписка на сообщения запрошена",
+      any("NewMessage" in n for n in plugin.update_hooks), plugin.update_hooks)
+
+
+class FakeEntity:
+    def __init__(self, offset, length, url):
+        self.offset, self.length, self.url = offset, length, url
+
+
+class FakeEntities:
+    def __init__(self, items):
+        self.items = items
+
+    def size(self):
+        return len(self.items)
+
+    def get(self, i):
+        return self.items[i]
+
+
+text = "Проверьте баланс на sberbank.ru прямо сейчас"
+update = types.SimpleNamespace(message=types.SimpleNamespace(
+    message=text,
+    entities=FakeEntities([FakeEntity(text.index("sberbank.ru"), len("sberbank.ru"),
+                                      "https://pay-now.top/enter")]),
+))
+plugin.on_update_hook("updateNewMessage", 0, update)
+check("подпись из сообщения запомнена",
+      plugin._anchors.get("https://pay-now.top/enter") == "sberbank.ru", plugin._anchors)
+
+if handler is not None:
+    param = FakeParam("https://pay-now.top/enter")
+    handler.before_hooked_method(param)
+    check("переход по подменённой подписи остановлен", param.cancelled)
+    check("в разборе назван настоящий домен",
+          "pay-now.top" in (FakeDialog.last.message or ""), FakeDialog.last.message)
+
+print("\nДоверенные домены")
+if handler is not None:
+    param = FakeParam("https://promo.example.top/gift?bonus=1")
+    handler.before_hooked_method(param)
+    check("подозрительная ссылка остановлена", param.cancelled)
+    FakeDialog.last.press("neutral")
+    check("доверие спрашивает подтверждение",
+          FakeDialog.last.title == lg.t("trust_title"), FakeDialog.last.title)
+    check("до подтверждения список пуст", not plugin.get_setting("whitelist", ""),
+          plugin.get_setting("whitelist", ""))
+
+    FakeDialog.last.press("positive")
+    check("отказ от подтверждения ничего не меняет",
+          not plugin.get_setting("whitelist", ""), plugin.get_setting("whitelist", ""))
+
+    handler.before_hooked_method(FakeParam("https://promo.example.top/gift?bonus=1"))
+    FakeDialog.last.press("neutral")
+    FakeDialog.last.press("negative")
+    check("домен попал в белый список после подтверждения",
+          "example.top" in plugin.get_setting("whitelist", ""),
+          plugin.get_setting("whitelist", ""))
+
+    again = FakeParam("https://promo.example.top/gift?bonus=2")
+    handler.before_hooked_method(again)
+    check("доверенный домен больше не тревожит", not again.cancelled)
+    plugin.set_setting("whitelist", "")
+    plugin._cache.clear()
+
+print("\nСписок исключений")
+for probe, expected in (("https://Example.COM/path?x=1", "example.com"),
+                        ("*.example.com", "example.com"),
+                        ("vk.com/feed", "vk.com"),
+                        ("почта.рф", "почта.рф"),
+                        ("example", ""),
+                        ("не домен", "")):
+    check("нормализация %r" % probe, lg.normalize_domain(probe) == expected,
+          lg.normalize_domain(probe))
+
+plugin.set_setting("whitelist", "")
+plugin.set_setting("whitelist_add", "https://Shop.Example.com/catalog")
+plugin._on_add_domain()
+check("домен добавлен кнопкой", plugin._whitelist_list() == ["shop.example.com"],
+      plugin._whitelist_list())
+check("поле ввода очищено", not plugin.get_setting("whitelist_add", ""),
+      plugin.get_setting("whitelist_add", ""))
+
+plugin.set_setting("whitelist_add", "мусор")
+plugin._on_add_domain()
+check("мусор в список не попадает", plugin._whitelist_list() == ["shop.example.com"],
+      plugin._whitelist_list())
+
+plugin.set_setting("whitelist", "shop.example.com, ozon.ru")
+rows = plugin._exception_rows()
+titles = [getattr(r, "text", None) for r in rows]
+check("каждый домен отдельной строкой",
+      "shop.example.com" in titles and "ozon.ru" in titles, titles)
+check("в конце есть кнопка добавления", lg.t("btn_add") in titles, titles)
+
+remove = plugin._make_remove("ozon.ru")
+FakeDialog.last = None
+remove()
+check("удаление спрашивает подтверждение",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("del_title"),
+      FakeDialog.last.title if FakeDialog.last else None)
+FakeDialog.last.press("positive")
+check("отказ оставляет домен", "ozon.ru" in plugin._whitelist_list(), plugin._whitelist_list())
+remove()
+FakeDialog.last.press("negative")
+check("после подтверждения домен удалён", plugin._whitelist_list() == ["shop.example.com"],
+      plugin._whitelist_list())
+
+plugin.set_setting("whitelist", "")
+plugin._cache.clear()
+
+plugin.set_setting("whitelist", "")
+plugin.set_setting("whitelist_add", "ozon.ru")
+plugin._on_add_domain()
+add_row = [r for r in plugin._exception_rows() if getattr(r, "key", "") == "whitelist_add"][0]
+check("поле ввода очищается и в отрисовке", add_row.default == "", add_row.default)
+plugin.set_setting("whitelist", "")
+
+print("\nДвойной вызов хука не задваивает счётчик")
+if handler is not None:
+    plugin._on_reset_stats_click()
+    plugin._counted.clear()
+    dirty = "https://shop.example.com/dup?utm_source=a&fbclid=b"
+    handler.before_hooked_method(FakeParam(dirty))
+    first = plugin._stat("stats_cleaned")
+    handler.before_hooked_method(FakeParam(dirty))
+    check("вторая перегрузка не считается заново",
+          plugin._stat("stats_cleaned") == first == 2, (first, plugin._stat("stats_cleaned")))
+
+    plugin._counted.clear()
+    handler.before_hooked_method(FakeParam("https://shop.example.com/other?utm_source=a"))
+    check("другая ссылка считается", plugin._stat("stats_cleaned") == 3,
+          plugin._stat("stats_cleaned"))
+
+print("\nРежимы показа разбора")
+if handler is not None:
+    plugin._cache.clear()
+    plugin._counted.clear()
+    weak = "https://novosti.xyz/article"
+    check("слабое замечание есть, но подозрительной не считается",
+          lg.analyze(weak).flags and not lg.analyze(weak).suspicious, lg.analyze(weak).flags)
+
+    plugin.set_setting("show_mode", 0)
+    param = FakeParam(weak)
+    handler.before_hooked_method(param)
+    check("слабое замечание поднимает разбор", param.cancelled)
+    FakeDialog.last.press("positive")
+
+    param = FakeParam("https://ozon.ru/product/1")
+    handler.before_hooked_method(param)
+    check("чистая ссылка открывается молча", not param.cancelled)
+
+    plugin.set_setting("show_mode", 1)
+    param = FakeParam("https://ozon.ru/product/2")
+    handler.before_hooked_method(param)
+    check("режим «всегда» показывает и чистую", param.cancelled)
+    FakeDialog.last.press("positive")
+    plugin.set_setting("show_mode", 0)
+
+print("\nПояснения и лог")
+FakeDialog.last = None
+plugin._on_tags_note()
+check("пояснение про метки открывается окном",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("tags_title"),
+      FakeDialog.last.title if FakeDialog.last else None)
+check("в окне полный текст, а не обрезок",
+      "utm_source" in (FakeDialog.last.message or ""), FakeDialog.last.message)
+
+FakeDialog.last = None
+plugin._on_privacy_note()
+check("«как это работает» тоже открывается окном",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("privacy_title"))
+
+print("\nСброс счётчиков")
+plugin.set_setting("stats_cleaned", 7)
+plugin.set_setting("stats_warned", 3)
+plugin._on_reset_stats_click()
+check("оба счётчика обнулены",
+      plugin._stat("stats_cleaned") == 0 and plugin._stat("stats_warned") == 0,
+      (plugin._stat("stats_cleaned"), plugin._stat("stats_warned")))
+check("экран настроек перерисован", plugin.reloaded, plugin.reloaded)
+
+print("\nСчётчики и кэш")
+plugin._on_reset_stats_click()
+if handler is not None:
+    handler.before_hooked_method(FakeParam("https://shop.example.com/x?utm_source=a&fbclid=b"))
+    check("вырезанные метки посчитаны", plugin._stat("stats_cleaned") == 2,
+          plugin._stat("stats_cleaned"))
+    handler.before_hooked_method(FakeParam("https://sberbamk.ru/login"))
+    check("предупреждения посчитаны", plugin._stat("stats_warned") == 1,
+          plugin._stat("stats_warned"))
+
+first = plugin._cached_analyze("https://example.com/cached")
+first.add(lg.HIGH, "пометка только для этой копии")
+second = plugin._cached_analyze("https://example.com/cached")
+check("кэш отдаёт независимую копию", not second.suspicious, second.flags)
+plugin.set_setting("whitelist", "example.com")
+third = plugin._cached_analyze("https://example.com/cached")
+check("смена настроек кэш не переиспользует", not third.flags, third.flags)
+plugin.set_setting("whitelist", "")
+
+print("\nОткрытие ссылки")
+if handler is not None:
+    opened = []
+    plugin._browser_cls = types.SimpleNamespace(
+        openUrl=lambda ctx, url: opened.append(url))
+    param = FakeParam("https://promo-gift.top/bonus")
+    handler.before_hooked_method(param)
+    FakeDialog.last.press("positive")
+    check("открытие идёт напрямую через Browser.openUrl", opened == ["https://promo-gift.top/bonus"],
+          opened)
+    check("повторный вызов перехваченного метода не понадобился",
+          not param.method.calls, param.method.calls)
+
+    plugin._browser_cls = types.SimpleNamespace()
+    param = FakeParam("https://promo-gift.top/bonus2")
+    handler.before_hooked_method(param)
+    FakeDialog.last.press("positive")
+    check("без Browser.openUrl работает запасной путь", len(param.method.calls) == 1,
+          param.method.calls)
+    plugin._browser_cls = None
+
+print("\nОкно обновления")
+info = {"version": "9.9.9", "url": "https://example.com/link_guard.plugin",
+        "changelog": ["первая строка", "вторая строка"]}
+check("чейнджлог списком разворачивается в пункты",
+      "• первая строка" in lg.LinkGuardPlugin._format_changelog(info),
+      lg.LinkGuardPlugin._format_changelog(info))
+check("чейнджлог строкой тоже работает",
+      "• одна строка" in lg.LinkGuardPlugin._format_changelog({"changelog": "одна строка"}))
+
+downloads = []
+plugin._download_update = lambda link, remote: downloads.append((link, remote))
+FakeDialog.last = None
+plugin._show_update(info, "9.9.9")
+check("окно обновления показано", FakeDialog.last is not None and FakeDialog.last.shown)
+check("главная кнопка — установить",
+      FakeDialog.last.buttons["positive"][0] == lg.t("upd_install"))
+check("вторая кнопка — позже",
+      FakeDialog.last.buttons["negative"][0] == lg.t("btn_later"))
+check("в тексте есть пункты чейнджлога",
+      "• вторая строка" in (FakeDialog.last.message or ""), FakeDialog.last.message)
+
+FakeDialog.last.press("positive")
+check("нажатие запускает загрузку", downloads == [("https://example.com/link_guard.plugin", "9.9.9")],
+      downloads)
+check("во время загрузки показан индикатор",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("upd_downloading"),
+      FakeDialog.last.title if FakeDialog.last else None)
+plugin._hide_progress()
 
 print("\nЧистка исходящих")
 plugin.set_setting("clean_outgoing", True)
