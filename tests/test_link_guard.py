@@ -26,6 +26,9 @@ def _stub(name, **attrs):
 class FakeDialog:
 
     last = None
+    ALERT_TYPE_MESSAGE = 0
+    ALERT_TYPE_LOADING = 1
+    ALERT_TYPE_SPINNER = 2
 
     def __init__(self, activity, progress_style=None):
         FakeDialog.last = self
@@ -48,6 +51,9 @@ class FakeDialog:
     def set_neutral_button(self, text, callback):
         self.buttons["neutral"] = (text, callback)
 
+    def set_cancelable(self, value):
+        self.cancelable = value
+
     def show(self):
         self.shown = True
 
@@ -67,10 +73,20 @@ class FakeMethod:
         self.calls.append(args)
 
 
+class FakeContext:
+    started = []
+
+    def getPackageName(self):
+        return "org.telegram.messenger"
+
+    def startActivity(self, intent):
+        FakeContext.started.append(intent)
+
+
 class FakeParam:
 
     def __init__(self, url):
-        self.args = [object(), url]
+        self.args = [FakeContext(), url]
         self.method = FakeMethod()
         self.cancelled = False
 
@@ -145,8 +161,14 @@ def install_stubs():
     _stub("ui.alert", AlertDialogBuilder=FakeDialog)
 
     fragment = types.SimpleNamespace(getParentActivity=lambda: object())
+    sent_documents = []
     _stub("client_utils", get_last_fragment=lambda: fragment,
-          run_on_queue=lambda fn, *a, **kw: fn())
+          run_on_queue=lambda fn, *a, **kw: fn(),
+          send_document=lambda peer, path, caption=None: sent_documents.append((peer, path)),
+          get_user_config=lambda *a: types.SimpleNamespace(getClientUserId=lambda: 42))
+    _stub("file_utils", get_plugins_dir=lambda: "/tmp/plugins",
+          ensure_dir_exists=lambda path: None,
+          write_file_bytes=lambda path, data: None)
     _stub("android_utils", log=lambda *a: None, run_on_ui_thread=lambda f, d=0: f(),
           copy_to_clipboard=lambda t: None)
     _stub("hook_utils", find_class=lambda name: types.SimpleNamespace(name=name))
@@ -282,14 +304,19 @@ if handler is not None:
           FakeDialog.last is not None and FakeDialog.last.shown
           and FakeDialog.last.title == lg.t("title_danger"),
           FakeDialog.last.title if FakeDialog.last else None)
-    check("в диалоге есть кнопка отмены", "negative" in FakeDialog.last.buttons)
-    check("в диалоге есть кнопка доверия домену", "neutral" in FakeDialog.last.buttons)
+    check("на опасной ссылке главная кнопка — отмена",
+          FakeDialog.last.buttons["positive"][0] == lg.t("btn_cancel"),
+          FakeDialog.last.buttons["positive"][0])
+    check("переход спрятан во вторую кнопку",
+          FakeDialog.last.buttons["negative"][0] == lg.t("btn_open"))
+    check("доверять опасному домену одним тапом нельзя",
+          "neutral" not in FakeDialog.last.buttons)
 
 if handler is not None:
     print("\nПовторный вызов после одобрения")
     param = FakeParam("https://gosuslugi.ru.verify.cyou/enter")
     handler.before_hooked_method(param)
-    FakeDialog.last.press("positive")
+    FakeDialog.last.press("negative")
     check("после «Открыть» ссылка переоткрыта", len(param.method.calls) == 1,
           param.method.calls)
 
@@ -421,6 +448,56 @@ plugin.set_setting("whitelist", "example.com")
 third = plugin._cached_analyze("https://example.com/cached")
 check("смена настроек кэш не переиспользует", not third.flags, third.flags)
 plugin.set_setting("whitelist", "")
+
+print("\nОткрытие ссылки")
+if handler is not None:
+    opened = []
+    plugin._browser_cls = types.SimpleNamespace(
+        openUrl=lambda ctx, url: opened.append(url))
+    param = FakeParam("https://promo-gift.top/bonus")
+    handler.before_hooked_method(param)
+    FakeDialog.last.press("positive")
+    check("открытие идёт напрямую через Browser.openUrl", opened == ["https://promo-gift.top/bonus"],
+          opened)
+    check("повторный вызов перехваченного метода не понадобился",
+          not param.method.calls, param.method.calls)
+
+    plugin._browser_cls = types.SimpleNamespace()
+    param = FakeParam("https://promo-gift.top/bonus2")
+    handler.before_hooked_method(param)
+    FakeDialog.last.press("positive")
+    check("без Browser.openUrl работает запасной путь", len(param.method.calls) == 1,
+          param.method.calls)
+    plugin._browser_cls = None
+
+print("\nОкно обновления")
+info = {"version": "9.9.9", "url": "https://example.com/link_guard.plugin",
+        "changelog": ["первая строка", "вторая строка"]}
+check("чейнджлог списком разворачивается в пункты",
+      "• первая строка" in lg.LinkGuardPlugin._format_changelog(info),
+      lg.LinkGuardPlugin._format_changelog(info))
+check("чейнджлог строкой тоже работает",
+      "• одна строка" in lg.LinkGuardPlugin._format_changelog({"changelog": "одна строка"}))
+
+downloads = []
+plugin._download_update = lambda link, remote: downloads.append((link, remote))
+FakeDialog.last = None
+plugin._show_update(info, "9.9.9")
+check("окно обновления показано", FakeDialog.last is not None and FakeDialog.last.shown)
+check("главная кнопка — установить",
+      FakeDialog.last.buttons["positive"][0] == lg.t("upd_install"))
+check("вторая кнопка — позже",
+      FakeDialog.last.buttons["negative"][0] == lg.t("btn_later"))
+check("в тексте есть пункты чейнджлога",
+      "• вторая строка" in (FakeDialog.last.message or ""), FakeDialog.last.message)
+
+FakeDialog.last.press("positive")
+check("нажатие запускает загрузку", downloads == [("https://example.com/link_guard.plugin", "9.9.9")],
+      downloads)
+check("во время загрузки показан индикатор",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("upd_downloading"),
+      FakeDialog.last.title if FakeDialog.last else None)
+plugin._hide_progress()
 
 print("\nЧистка исходящих")
 plugin.set_setting("clean_outgoing", True)

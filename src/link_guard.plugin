@@ -67,6 +67,16 @@ except Exception:
     def find_class(name):
         return None
 
+try:
+    from client_utils import send_document, get_user_config
+except Exception:
+    send_document = get_user_config = None
+
+try:
+    from file_utils import get_plugins_dir, ensure_dir_exists, write_file_bytes
+except Exception:
+    get_plugins_dir = ensure_dir_exists = write_file_bytes = None
+
 
 STRINGS = {
     "ru": {
@@ -105,9 +115,8 @@ STRINGS = {
         "title_suspicious": "⚠️ Подозрительная ссылка",
         "title_info": "🔗 Разбор ссылки",
         "btn_open": "Открыть",
-        "btn_open_anyway": "Всё равно открыть",
         "btn_cancel": "Отмена",
-        "btn_trust": "Доверять домену",
+        "btn_trust": "Доверять",
         "lbl_domain": "Домен: %s",
         "lbl_leads": "Ведёт на: %s",
         "lbl_removed": "Убрано меток: %s (%s)",
@@ -120,7 +129,13 @@ STRINGS = {
         "toast_blocked": "Link Guard: ссылка выглядит опасной, переход отменён",
         "toast_checking": "Проверяю обновления…",
         "toast_upd_failed": "Не удалось проверить обновления",
-        "toast_upd_latest": "Установлена последняя версия %s",
+        "upd_none": "Обновлений нет · установлена %s",
+        "upd_ahead": "У вас сборка новее опубликованной: %s (в каталоге %s)",
+        "upd_whats_new": "Что нового:",
+        "upd_install": "Установить сейчас",
+        "upd_downloading": "Скачиваю обновление…",
+        "upd_sent": "Файл отправлен в «Избранное» — нажмите на него, чтобы установить",
+        "upd_dl_failed": "Не удалось скачать файл, ссылка скопирована",
         "toast_upd_available": "Link Guard: доступна версия %s",
         "upd_title": "Доступна версия %s",
         "upd_body": "Установлена %s.\n\n%s\n\n%s",
@@ -188,9 +203,8 @@ STRINGS = {
         "title_suspicious": "⚠️ Suspicious link",
         "title_info": "🔗 Link breakdown",
         "btn_open": "Open",
-        "btn_open_anyway": "Open anyway",
         "btn_cancel": "Cancel",
-        "btn_trust": "Trust domain",
+        "btn_trust": "Trust",
         "lbl_domain": "Domain: %s",
         "lbl_leads": "Leads to: %s",
         "lbl_removed": "Tags removed: %s (%s)",
@@ -203,7 +217,13 @@ STRINGS = {
         "toast_blocked": "Link Guard: the link looks dangerous, opening cancelled",
         "toast_checking": "Checking for updates…",
         "toast_upd_failed": "Could not check for updates",
-        "toast_upd_latest": "You are on the latest version %s",
+        "upd_none": "No updates · you have %s",
+        "upd_ahead": "Your build is newer than the published one: %s (catalog has %s)",
+        "upd_whats_new": "What is new:",
+        "upd_install": "Install now",
+        "upd_downloading": "Downloading the update…",
+        "upd_sent": "The file was sent to Saved Messages — tap it to install",
+        "upd_dl_failed": "Could not download the file, the link was copied",
         "toast_upd_available": "Link Guard: version %s is available",
         "upd_title": "Version %s is available",
         "upd_body": "You have %s.\n\n%s\n\n%s",
@@ -238,31 +258,7 @@ STRINGS = {
 }
 
 
-def detect_language():
-    for reader in (_lang_from_client, _lang_from_system):
-        try:
-            code = reader()
-        except Exception:
-            code = None
-        if code:
-            return "ru" if code.lower().startswith(("ru", "uk", "be", "kk")) else "en"
-    return "ru"
-
-
-def _lang_from_client():
-    cls = find_class("org.telegram.messenger.LocaleController")
-    if cls is None:
-        return None
-    info = cls.getInstance().getCurrentLocaleInfo()
-    return str(info.shortName or "") or None
-
-
-def _lang_from_system():
-    from java.util import Locale
-    return str(Locale.getDefault().getLanguage() or "") or None
-
-
-LANG = detect_language()
+LANG = "ru"
 
 
 def t(key, *args):
@@ -668,6 +664,8 @@ class LinkGuardPlugin(BasePlugin):
         self._anchors = {}
         self._hooks = []
         self._menu_check = self._menu_copy = None
+        self._browser_cls = None
+        self._progress = None
 
         self._install_open_url_hook()
         self._install_update_hook()
@@ -806,9 +804,12 @@ class LinkGuardPlugin(BasePlugin):
             return
 
         remote = str(info.get("version", ""))
-        if parse_version(remote) <= parse_version(__version__):
+        local, published = parse_version(__version__), parse_version(remote)
+        if published <= local:
             if manual:
-                run_on_ui_thread(lambda: self._toast(t("toast_upd_latest", __version__)))
+                text = (t("upd_none", __version__) if published == local
+                        else t("upd_ahead", __version__, remote))
+                run_on_ui_thread(lambda: self._toast(text))
             return
 
         if not manual and self.get_setting("update_notified", "") == remote:
@@ -816,21 +817,94 @@ class LinkGuardPlugin(BasePlugin):
         self.set_setting("update_notified", remote)
         run_on_ui_thread(lambda: self._show_update(info, remote))
 
-    def _show_update(self, info, remote):
-        changelog = str(info.get("changelog", "")).strip()
+    @staticmethod
+    def _format_changelog(info):
+        raw = info.get("changelog", "")
+        if isinstance(raw, (list, tuple)):
+            items = [str(i).strip() for i in raw if str(i).strip()]
+        else:
+            items = [line.strip(" -•\t") for line in str(raw).splitlines() if line.strip()]
+        if not items:
+            return ""
+        return "%s\n%s" % (t("upd_whats_new"), "\n".join("• " + item for item in items))
+
+    def _show_update(self, info, remote, attempt=0):
         link = str(info.get("url") or REPO_URL)
 
         if not self._can_dialog():
-            self._toast(t("toast_upd_available", remote))
+            if attempt < 5:
+                run_on_ui_thread(lambda: self._show_update(info, remote, attempt + 1), 3000)
+            else:
+                self._toast(t("toast_upd_available", remote))
             return
 
         builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
         builder.set_title(t("upd_title", remote))
-        builder.set_message(t("upd_body", __version__, changelog, link))
-        builder.set_positive_button(t("btn_copy_link"),
-                                    lambda d, w: (d.dismiss(), copy_to_clipboard(link)))
+        builder.set_message(t("upd_body", __version__, self._format_changelog(info), link))
+        builder.set_positive_button(
+            t("upd_install"), lambda d, w: (d.dismiss(), self._install_update(link, remote)))
         builder.set_negative_button(t("btn_later"), lambda d, w: d.dismiss())
         builder.show()
+
+    def _install_update(self, link, remote):
+        self._show_progress()
+        self._run_background(lambda: self._download_update(link, remote))
+
+    def _show_progress(self):
+        self._progress = None
+        if not self._can_dialog():
+            return
+        try:
+            builder = AlertDialogBuilder(get_last_fragment().getParentActivity(),
+                                         AlertDialogBuilder.ALERT_TYPE_SPINNER)
+            builder.set_title(t("upd_downloading"))
+            builder.set_cancelable(False)
+            builder.show()
+            self._progress = builder
+        except Exception as e:
+            log("LinkGuard: progress dialog failed: %s" % e)
+
+    def _hide_progress(self):
+        dialog, self._progress = getattr(self, "_progress", None), None
+        if dialog is not None:
+            try:
+                dialog.dismiss()
+            except Exception:
+                pass
+
+    def _download_update(self, link, remote):
+        path = None
+        try:
+            import requests
+            resp = requests.get(link, timeout=30,
+                                headers={"User-Agent": "LinkGuard/%s" % __version__})
+            if resp.status_code == 200 and resp.content and get_plugins_dir is not None:
+                folder = str(get_plugins_dir()).rstrip("/\\")
+                ensure_dir_exists(folder)
+                path = "%s/link_guard_%s.plugin" % (folder, remote.replace(".", "_"))
+                write_file_bytes(path, resp.content)
+        except Exception as e:
+            log("LinkGuard: download failed: %s" % e)
+            path = None
+
+        sent = False
+        if path and send_document is not None and get_user_config is not None:
+            try:
+                send_document(get_user_config().getClientUserId(), path,
+                              "Link Guard %s" % remote)
+                sent = True
+            except Exception as e:
+                log("LinkGuard: send failed: %s" % e)
+
+        def finish():
+            self._hide_progress()
+            if sent:
+                self._toast(t("upd_sent"))
+            else:
+                copy_to_clipboard(link)
+                self._toast(t("upd_dl_failed"))
+
+        run_on_ui_thread(finish)
 
     def _on_check_updates_click(self, *args):
         self._toast(t("toast_checking"))
@@ -853,6 +927,7 @@ class LinkGuardPlugin(BasePlugin):
                 cls = None
             if cls is None:
                 continue
+            self._browser_cls = cls
             try:
                 hooks = self.hook_all_methods(cls, "openUrl", handler)
                 if hooks:
@@ -1079,11 +1154,14 @@ class LinkGuardPlugin(BasePlugin):
             self._trust_domain(verdict)
             self._reopen(method, args, index, target)
 
-        builder.set_positive_button(
-            t("btn_open_anyway") if verdict.risk == HIGH else t("btn_open"), do_open)
-        builder.set_negative_button(t("btn_cancel"), lambda d, w: d.dismiss())
-        if verdict.host:
-            builder.set_neutral_button(t("btn_trust"), do_trust)
+        if verdict.risk == HIGH:
+            builder.set_positive_button(t("btn_cancel"), lambda d, w: d.dismiss())
+            builder.set_negative_button(t("btn_open"), do_open)
+        else:
+            builder.set_positive_button(t("btn_open"), do_open)
+            builder.set_negative_button(t("btn_cancel"), lambda d, w: d.dismiss())
+            if verdict.host:
+                builder.set_neutral_button(t("btn_trust"), do_trust)
         builder.show()
 
     def _trust_domain(self, verdict):
@@ -1099,22 +1177,76 @@ class LinkGuardPlugin(BasePlugin):
             self._cache.clear()
         self._toast(t("toast_trusted", domain))
 
+    @staticmethod
+    def _context_from(args):
+        for arg in args or ():
+            if isinstance(arg, str) or arg is None:
+                continue
+            if getattr(arg, "getPackageName", None) is not None:
+                return arg
+        return None
+
+    def _open_with_browser(self, context, url):
+        if self._browser_cls is None or context is None:
+            return False
+        try:
+            self._browser_cls.openUrl(context, url)
+            return True
+        except Exception as e:
+            log("LinkGuard: browser.openUrl failed: %s" % e)
+            return False
+
+    @staticmethod
+    def _open_with_intent(context, url):
+        if context is None:
+            return False
+        try:
+            intent_cls = find_class("android.content.Intent")
+            uri_cls = find_class("android.net.Uri")
+            if intent_cls is None or uri_cls is None:
+                return False
+            intent = intent_cls(intent_cls.ACTION_VIEW, uri_cls.parse(url))
+            intent.addFlags(intent_cls.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            return True
+        except Exception as e:
+            log("LinkGuard: intent failed: %s" % e)
+            return False
+
     def _reopen(self, method, args, index, url):
-        self._bypass[url] = time.monotonic()
-        new_args = list(args)
-        if index is not None and isinstance(new_args[index], str):
-            new_args[index] = url
-        try:
-            method.invoke(None, *new_args)
+        now = time.monotonic()
+        self._bypass[url] = now
+        original = None
+        if index is not None and args and isinstance(args[index], str):
+            original = args[index]
+            self._bypass[original] = now
+
+        context = self._context_from(args)
+
+        if self._open_with_browser(context, url):
             return
-        except Exception as e:
-            log("LinkGuard: reopen failed (varargs): %s" % e)
-        try:
-            method.invoke(None, new_args)
+
+        if method is not None:
+            new_args = list(args or ())
+            if index is not None and new_args and isinstance(new_args[index], str):
+                new_args[index] = url
+            try:
+                method.invoke(None, *new_args)
+                return
+            except Exception as e:
+                log("LinkGuard: reopen failed (varargs): %s" % e)
+            try:
+                method.invoke(None, new_args)
+                return
+            except Exception as e:
+                log("LinkGuard: reopen failed (list): %s" % e)
+
+        if self._open_with_intent(context, url):
             return
-        except Exception as e:
-            log("LinkGuard: reopen failed (list): %s" % e)
+
         self._bypass.pop(url, None)
+        if original:
+            self._bypass.pop(original, None)
         copy_to_clipboard(url)
         self._toast(t("toast_copied"))
 
