@@ -678,7 +678,10 @@ def fetch_update_info(timeout=8):
     try:
         import requests
         resp = requests.get(UPDATE_URL, timeout=timeout,
-                            headers={"User-Agent": "LinkGuard/%s" % __version__})
+                            params={"ts": int(time.time())},
+                            headers={"User-Agent": "LinkGuard/%s" % __version__,
+                                     "Cache-Control": "no-cache",
+                                     "Pragma": "no-cache"})
         if resp.status_code != 200:
             log("LinkGuard: update check HTTP %s" % resp.status_code)
             return None
