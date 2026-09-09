@@ -83,9 +83,9 @@ STRINGS = {
         "hdr_checks": "Проверка ссылок",
         "sw_check": "Проверять перед открытием",
         "sw_check_sub": "Разбирает адрес до перехода и предупреждает о подозрительном",
-        "sel_mode": "Показывать разбор",
-        "mode_suspicious": "Только при подозрении",
-        "mode_always": "Для каждой ссылки",
+        "sel_mode": "Показывать",
+        "mode_suspicious": "При подозрении",
+        "mode_always": "Всегда",
         "sw_expand": "Разворачивать короткие ссылки",
         "sw_expand_sub": "Делает сетевой запрос, чтобы узнать конечный адрес",
         "hdr_tracker": "Антитрекер",
@@ -109,6 +109,12 @@ STRINGS = {
         "toast_removed": "%s снова проверяется",
         "toast_bad_domain": "Не похоже на домен",
         "tags_title": "Что такое метки",
+        "read_more": "Нажмите, чтобы прочитать",
+        "btn_dump_log": "Выгрузить лог",
+        "btn_dump_log_sub": "Отправит текстовый файл в «Избранное»",
+        "log_empty": "Лог пуст — включите подробный лог и повторите действие",
+        "log_sent": "Лог отправлен в «Избранное»",
+        "log_failed": "Не удалось отправить файл, лог скопирован в буфер",
         "tags_note": "utm_source, fbclid и подобные хвосты сообщают рекламным сетям, откуда вы "
                      "пришли и кто дал вам ссылку. Без них адрес работает так же.",
         "toast_cleaned": "Убрано меток слежения: %s",
@@ -192,9 +198,9 @@ STRINGS = {
         "hdr_checks": "Link checks",
         "sw_check": "Check before opening",
         "sw_check_sub": "Inspects the address before you follow it and warns about anything odd",
-        "sel_mode": "Show breakdown",
-        "mode_suspicious": "Only when suspicious",
-        "mode_always": "For every link",
+        "sel_mode": "Show",
+        "mode_suspicious": "If suspicious",
+        "mode_always": "Always",
         "sw_expand": "Expand short links",
         "sw_expand_sub": "Makes a network request to reveal the final address",
         "hdr_tracker": "Anti-tracker",
@@ -218,6 +224,12 @@ STRINGS = {
         "toast_removed": "%s is checked again",
         "toast_bad_domain": "That does not look like a domain",
         "tags_title": "What tags are",
+        "read_more": "Tap to read",
+        "btn_dump_log": "Export log",
+        "btn_dump_log_sub": "Sends a text file to Saved Messages",
+        "log_empty": "The log is empty — enable the verbose log and repeat the action",
+        "log_sent": "The log was sent to Saved Messages",
+        "log_failed": "Could not send the file, the log was copied instead",
         "tags_note": "utm_source, fbclid and similar tails tell ad networks where you came from "
                      "and who gave you the link. The address works the same without them.",
         "toast_cleaned": "Tracking tags removed: %s",
@@ -392,6 +404,8 @@ CACHE_TTL = 300.0
 CACHE_MAX = 200
 ANCHOR_MAX = 300
 COUNT_WINDOW = 5.0
+LOG_LIMIT = 400
+LOG_BUFFER = []
 
 
 class Verdict:
@@ -796,7 +810,7 @@ class LinkGuardPlugin(BasePlugin):
             Text(text=t("stats_line", self._stat("stats_cleaned")),
                  subtext=t("stats_sub", self._stat("stats_warned")),
                  on_click=self._on_reset_stats_click),
-            Text(text=t("tags_title"), subtext=t("tags_note")),
+            Text(text=t("tags_title"), subtext=t("read_more"), on_click=self._on_tags_note),
 
             Header(text=t("hdr_updates")),
             Switch(key="check_updates", text=t("sw_updates"), default=True,
@@ -808,8 +822,12 @@ class LinkGuardPlugin(BasePlugin):
             Switch(key="debug_log", text=t("sw_debug"), default=False,
                    subtext=t("sw_debug_sub")),
 
+            Text(text=t("btn_dump_log"), subtext=t("btn_dump_log_sub"),
+                 on_click=self._on_dump_log),
+
             Divider(),
-            Text(text=t("privacy_title"), subtext=t("privacy_note")),
+            Text(text=t("privacy_title"), subtext=t("read_more"),
+                 on_click=self._on_privacy_note),
         ]
 
     def _exception_rows(self):
@@ -914,7 +932,9 @@ class LinkGuardPlugin(BasePlugin):
 
     def _bump(self, key, amount=1):
         if amount:
-            self.set_setting(key, self._stat(key) + amount)
+            value = self._stat(key) + amount
+            self.set_setting(key, value, reload_settings=True)
+            self._debug("%s +%s -> %s" % (key, amount, value))
 
     def _on_reset_stats_click(self, *args):
         self.set_setting("stats_cleaned", 0)
@@ -1351,8 +1371,59 @@ class LinkGuardPlugin(BasePlugin):
         self._toast(t("toast_trusted", domain))
 
     def _debug(self, message):
-        if self.get_setting("debug_log", False):
-            log("LinkGuard: %s" % message)
+        if not self.get_setting("debug_log", False):
+            return
+        line = "%s  %s" % (time.strftime("%H:%M:%S"), message)
+        LOG_BUFFER.append(line)
+        if len(LOG_BUFFER) > LOG_LIMIT:
+            del LOG_BUFFER[:len(LOG_BUFFER) - LOG_LIMIT]
+        log("LinkGuard: %s" % message)
+
+    def _show_note(self, title, body):
+        if not self._can_dialog():
+            self._toast(body)
+            return
+        builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
+        builder.set_title(title)
+        builder.set_message(body)
+        builder.set_positive_button(t("btn_ok"), lambda d, w: d.dismiss())
+        builder.show()
+
+    def _on_tags_note(self, *args):
+        self._show_note(t("tags_title"), t("tags_note"))
+
+    def _on_privacy_note(self, *args):
+        self._show_note(t("privacy_title"), t("privacy_note"))
+
+    def _on_dump_log(self, *args):
+        if not LOG_BUFFER:
+            self._toast(t("log_empty"))
+            return
+        header = "Link Guard %s | %s | записей: %d" % (__version__, LANG, len(LOG_BUFFER))
+        text = "\n".join([header] + list(LOG_BUFFER))
+        self._run_background(lambda: self._send_log(text))
+
+    def _send_log(self, text):
+        sent = False
+        try:
+            if get_plugins_dir is not None and send_document is not None:
+                folder = str(get_plugins_dir()).rstrip("/\\")
+                ensure_dir_exists(folder)
+                path = "%s/link_guard_log.txt" % folder
+                write_file_bytes(path, text.encode("utf-8"))
+                send_document(get_user_config().getClientUserId(), path, "Link Guard log")
+                sent = True
+        except Exception as e:
+            log("LinkGuard: log export failed: %s" % e)
+
+        def finish():
+            if sent:
+                self._toast(t("log_sent"))
+            else:
+                copy_to_clipboard(text)
+                self._toast(t("log_failed"))
+
+        run_on_ui_thread(finish)
 
     @staticmethod
     def _replace_url_arg(args, index, url):

@@ -106,6 +106,9 @@ class FakeParam:
         self.cancelled = True
 
 
+SENT_DOCUMENTS = []
+
+
 def install_stubs():
     hooks_installed = []
 
@@ -176,7 +179,7 @@ def install_stubs():
     _stub("ui.alert", AlertDialogBuilder=FakeDialog)
 
     fragment = types.SimpleNamespace(getParentActivity=lambda: object())
-    sent_documents = []
+    sent_documents = SENT_DOCUMENTS
     _stub("client_utils", get_last_fragment=lambda: fragment,
           run_on_queue=lambda fn, *a, **kw: fn(),
           send_document=lambda peer, path, caption=None: sent_documents.append((peer, path)),
@@ -528,6 +531,41 @@ if handler is not None:
     handler.before_hooked_method(FakeParam("https://shop.example.com/other?utm_source=a"))
     check("другая ссылка считается", plugin._stat("stats_cleaned") == 3,
           plugin._stat("stats_cleaned"))
+
+print("\nПояснения и лог")
+FakeDialog.last = None
+plugin._on_tags_note()
+check("пояснение про метки открывается окном",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("tags_title"),
+      FakeDialog.last.title if FakeDialog.last else None)
+check("в окне полный текст, а не обрезок",
+      "utm_source" in (FakeDialog.last.message or ""), FakeDialog.last.message)
+
+FakeDialog.last = None
+plugin._on_privacy_note()
+check("«как это работает» тоже открывается окном",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("privacy_title"))
+
+lg.LOG_BUFFER.clear()
+plugin.set_setting("debug_log", False)
+plugin._debug("не должно попасть в лог")
+check("без тумблера лог не пишется", not lg.LOG_BUFFER, lg.LOG_BUFFER)
+
+plugin.set_setting("debug_log", True)
+plugin._debug("проверочная строка")
+check("с тумблером строка записана", len(lg.LOG_BUFFER) == 1, lg.LOG_BUFFER)
+
+SENT_DOCUMENTS.clear()
+plugin._on_dump_log()
+check("лог уходит файлом в Избранное",
+      len(SENT_DOCUMENTS) == 1 and SENT_DOCUMENTS[0][1].endswith("link_guard_log.txt"),
+      SENT_DOCUMENTS)
+
+lg.LOG_BUFFER.clear()
+SENT_DOCUMENTS.clear()
+plugin._on_dump_log()
+check("пустой лог не отправляется", not SENT_DOCUMENTS, SENT_DOCUMENTS)
+plugin.set_setting("debug_log", False)
 
 print("\nСброс счётчиков")
 plugin.set_setting("stats_cleaned", 7)
