@@ -107,6 +107,7 @@ class FakeParam:
 
 
 SENT_DOCUMENTS = []
+SENT_TEXTS = []
 
 
 def install_stubs():
@@ -183,6 +184,7 @@ def install_stubs():
     _stub("client_utils", get_last_fragment=lambda: fragment,
           run_on_queue=lambda fn, *a, **kw: fn(),
           send_document=lambda peer, path, caption=None: sent_documents.append((peer, path)),
+          send_text=lambda peer, text, **kw: SENT_TEXTS.append((peer, text)),
           get_user_config=lambda *a: types.SimpleNamespace(getClientUserId=lambda: 42))
     _stub("file_utils", get_plugins_dir=lambda: "/tmp/plugins",
           get_cache_dir=lambda: "/tmp/cache",
@@ -592,6 +594,23 @@ lg.LOG_BUFFER.clear()
 SENT_DOCUMENTS.clear()
 plugin._on_dump_log()
 check("пустой лог не отправляется", not SENT_DOCUMENTS, SENT_DOCUMENTS)
+
+plugin.set_setting("debug_log", True)
+plugin._debug("строка для запасного пути")
+real_doc = lg.send_document
+lg.send_document = None
+SENT_TEXTS.clear()
+plugin._on_dump_log()
+check("без send_document лог уходит сообщением", len(SENT_TEXTS) == 1, SENT_TEXTS)
+
+real_text = lg.send_text
+lg.send_text = None
+copied = []
+real_clip = lg.copy_to_clipboard
+lg.copy_to_clipboard = lambda text: copied.append(text)
+plugin._on_dump_log()
+check("без обоих способов лог идёт в буфер", len(copied) == 1, copied)
+lg.send_document, lg.send_text, lg.copy_to_clipboard = real_doc, real_text, real_clip
 plugin.set_setting("debug_log", False)
 
 print("\nСброс счётчиков")

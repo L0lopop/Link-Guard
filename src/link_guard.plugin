@@ -67,20 +67,22 @@ except Exception:
     def find_class(name):
         return None
 
-try:
-    from client_utils import send_document, get_user_config
-except Exception:
-    send_document = get_user_config = None
+def _grab(module_name, attribute):
+    try:
+        module = __import__(module_name, fromlist=[attribute])
+        return getattr(module, attribute, None)
+    except Exception:
+        return None
 
-try:
-    from file_utils import get_plugins_dir, ensure_dir_exists, write_file_bytes
-except Exception:
-    get_plugins_dir = ensure_dir_exists = write_file_bytes = None
 
-try:
-    from file_utils import get_cache_dir, get_documents_dir
-except Exception:
-    get_cache_dir = get_documents_dir = None
+send_document = _grab("client_utils", "send_document")
+send_text = _grab("client_utils", "send_text")
+get_user_config = _grab("client_utils", "get_user_config")
+get_plugins_dir = _grab("file_utils", "get_plugins_dir")
+get_cache_dir = _grab("file_utils", "get_cache_dir")
+get_documents_dir = _grab("file_utils", "get_documents_dir")
+ensure_dir_exists = _grab("file_utils", "ensure_dir_exists")
+write_file_bytes = _grab("file_utils", "write_file_bytes")
 
 
 STRINGS = {
@@ -120,6 +122,7 @@ STRINGS = {
         "log_empty": "Лог пуст — включите подробный лог и повторите действие",
         "log_sent": "Лог отправлен в «Избранное»",
         "log_failed": "Не удалось отправить файл, лог скопирован в буфер",
+        "log_failed_why": "Лог в буфере · причина: %s",
         "tags_note": "utm_source, fbclid и подобные хвосты сообщают рекламным сетям, откуда вы "
                      "пришли и кто дал вам ссылку. Без них адрес работает так же.",
         "toast_cleaned": "Убрано меток слежения: %s",
@@ -235,6 +238,7 @@ STRINGS = {
         "log_empty": "The log is empty — enable the verbose log and repeat the action",
         "log_sent": "The log was sent to Saved Messages",
         "log_failed": "Could not send the file, the log was copied instead",
+        "log_failed_why": "Log copied · reason: %s",
         "tags_note": "utm_source, fbclid and similar tails tell ad networks where you came from "
                      "and who gave you the link. The address works the same without them.",
         "toast_cleaned": "Tracking tags removed: %s",
@@ -757,6 +761,9 @@ class LinkGuardPlugin(BasePlugin):
         else:
             log("LinkGuard: меню сообщений недоступно в этом SDK")
         self._maybe_check_updates()
+        self._debug("helpers: send_document=%s send_text=%s user_config=%s plugins_dir=%s"
+                    % (send_document is not None, send_text is not None,
+                       get_user_config is not None, get_plugins_dir is not None))
         log("LinkGuard %s loaded, lang=%s" % (__version__, LANG))
 
     def on_plugin_unload(self):
@@ -946,7 +953,7 @@ class LinkGuardPlugin(BasePlugin):
         if getattr(self, "_stats", None) is None:
             self._stats = {}
         self._stats[key] = value
-        self.set_setting(key, value)
+        self.set_setting(key, value, reload_settings=True)
         self._debug("%s +%s -> %s" % (key, amount, value))
 
     def _on_reset_stats_click(self, *args):
@@ -1443,22 +1450,47 @@ class LinkGuardPlugin(BasePlugin):
                 self._debug("export: запись в %s не удалась: %s" % (path, e))
         return None
 
+    def _self_id(self):
+        if get_user_config is None:
+            return None
+        try:
+            return get_user_config().getClientUserId()
+        except Exception as e:
+            self._debug("export: свой id недоступен: %s" % e)
+            return None
+
     def _send_log(self, text):
         path = self._write_log_file(text)
 
         def finish():
-            sent = False
-            if path and send_document is not None and get_user_config is not None:
+            peer = self._self_id()
+            reason = ""
+
+            if path and send_document is not None and peer is not None:
                 try:
-                    send_document(get_user_config().getClientUserId(), path, "Link Guard log")
-                    sent = True
+                    send_document(peer, path, "Link Guard log")
+                    self._toast(t("log_sent"))
+                    return
                 except Exception as e:
-                    self._debug("export: отправка не удалась: %s" % e)
-            if sent:
-                self._toast(t("log_sent"))
-            else:
-                copy_to_clipboard(text)
-                self._toast(t("log_failed"))
+                    reason = str(e)
+                    self._debug("export: документ не ушёл: %s" % e)
+            elif send_document is None:
+                reason = "send_document недоступен"
+
+            if send_text is not None and peer is not None:
+                try:
+                    for chunk in [text[i:i + 3500] for i in range(0, len(text), 3500)]:
+                        send_text(peer, chunk)
+                    self._toast(t("log_sent"))
+                    return
+                except Exception as e:
+                    reason = str(e)
+                    self._debug("export: сообщение не ушло: %s" % e)
+            elif not reason:
+                reason = "send_text недоступен"
+
+            copy_to_clipboard(text)
+            self._toast(t("log_failed_why", reason[:60] or "неизвестно"))
 
         run_on_ui_thread(finish)
 
