@@ -185,6 +185,8 @@ def install_stubs():
           send_document=lambda peer, path, caption=None: sent_documents.append((peer, path)),
           get_user_config=lambda *a: types.SimpleNamespace(getClientUserId=lambda: 42))
     _stub("file_utils", get_plugins_dir=lambda: "/tmp/plugins",
+          get_cache_dir=lambda: "/tmp/cache",
+          get_documents_dir=lambda: "/tmp/docs",
           ensure_dir_exists=lambda path: None,
           write_file_bytes=lambda path, data: None)
     _stub("android_utils", log=lambda *a: None, run_on_ui_thread=lambda f, d=0: f(),
@@ -518,7 +520,7 @@ plugin.set_setting("whitelist", "")
 
 print("\nДвойной вызов хука не задваивает счётчик")
 if handler is not None:
-    plugin.set_setting("stats_cleaned", 0)
+    plugin._on_reset_stats_click()
     plugin._counted.clear()
     dirty = "https://shop.example.com/dup?utm_source=a&fbclid=b"
     handler.before_hooked_method(FakeParam(dirty))
@@ -577,8 +579,7 @@ check("оба счётчика обнулены",
 check("экран настроек перерисован", plugin.reloaded, plugin.reloaded)
 
 print("\nСчётчики и кэш")
-plugin.set_setting("stats_cleaned", 0)
-plugin.set_setting("stats_warned", 0)
+plugin._on_reset_stats_click()
 if handler is not None:
     handler.before_hooked_method(FakeParam("https://shop.example.com/x?utm_source=a&fbclid=b"))
     check("вырезанные метки посчитаны", plugin._stat("stats_cleaned") == 2,

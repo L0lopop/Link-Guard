@@ -77,6 +77,11 @@ try:
 except Exception:
     get_plugins_dir = ensure_dir_exists = write_file_bytes = None
 
+try:
+    from file_utils import get_cache_dir, get_documents_dir
+except Exception:
+    get_cache_dir = get_documents_dir = None
+
 
 STRINGS = {
     "ru": {
@@ -741,6 +746,7 @@ class LinkGuardPlugin(BasePlugin):
         self._browser_cls = None
         self._progress = None
         self._counted = {}
+        self._stats = {}
 
         self._install_open_url_hook()
         self._install_update_hook()
@@ -912,6 +918,9 @@ class LinkGuardPlugin(BasePlugin):
         return bool(self.get_setting("aggressive", False))
 
     def _stat(self, key):
+        tally = getattr(self, "_stats", None)
+        if tally is not None and key in tally:
+            return tally[key]
         try:
             return int(self.get_setting(key, 0) or 0)
         except (TypeError, ValueError):
@@ -931,12 +940,17 @@ class LinkGuardPlugin(BasePlugin):
         return True
 
     def _bump(self, key, amount=1):
-        if amount:
-            value = self._stat(key) + amount
-            self.set_setting(key, value, reload_settings=True)
-            self._debug("%s +%s -> %s" % (key, amount, value))
+        if not amount:
+            return
+        value = self._stat(key) + amount
+        if getattr(self, "_stats", None) is None:
+            self._stats = {}
+        self._stats[key] = value
+        self.set_setting(key, value)
+        self._debug("%s +%s -> %s" % (key, amount, value))
 
     def _on_reset_stats_click(self, *args):
+        self._stats = {"stats_cleaned": 0, "stats_warned": 0}
         self.set_setting("stats_cleaned", 0)
         self.set_setting("stats_warned", 0, reload_settings=True)
         self._toast(t("stats_done"))
@@ -1403,20 +1417,41 @@ class LinkGuardPlugin(BasePlugin):
         text = "\n".join([header] + list(LOG_BUFFER))
         self._run_background(lambda: self._send_log(text))
 
-    def _send_log(self, text):
-        sent = False
-        try:
-            if get_plugins_dir is not None and send_document is not None:
-                folder = str(get_plugins_dir()).rstrip("/\\")
-                ensure_dir_exists(folder)
-                path = "%s/link_guard_log.txt" % folder
+    def _write_log_file(self, text):
+        if write_file_bytes is None:
+            self._debug("export: file_utils недоступен")
+            return None
+        folders = []
+        for getter in (get_plugins_dir, get_cache_dir, get_documents_dir):
+            if getter is None:
+                continue
+            try:
+                folders.append(str(getter()).rstrip("/\\"))
+            except Exception as e:
+                self._debug("export: каталог недоступен: %s" % e)
+        for folder in folders:
+            path = "%s/link_guard_log.txt" % folder
+            try:
+                if ensure_dir_exists is not None:
+                    ensure_dir_exists(folder)
                 write_file_bytes(path, text.encode("utf-8"))
-                send_document(get_user_config().getClientUserId(), path, "Link Guard log")
-                sent = True
-        except Exception as e:
-            log("LinkGuard: log export failed: %s" % e)
+                self._debug("export: файл записан в %s" % path)
+                return path
+            except Exception as e:
+                self._debug("export: запись в %s не удалась: %s" % (path, e))
+        return None
+
+    def _send_log(self, text):
+        path = self._write_log_file(text)
 
         def finish():
+            sent = False
+            if path and send_document is not None and get_user_config is not None:
+                try:
+                    send_document(get_user_config().getClientUserId(), path, "Link Guard log")
+                    sent = True
+                except Exception as e:
+                    self._debug("export: отправка не удалась: %s" % e)
             if sent:
                 self._toast(t("log_sent"))
             else:
