@@ -2,7 +2,7 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
@@ -78,6 +78,10 @@ def _grab(module_name, attribute):
 send_document = _grab("client_utils", "send_document")
 get_user_config = _grab("client_utils", "get_user_config")
 get_plugins_dir = _grab("file_utils", "get_plugins_dir")
+get_cache_dir = _grab("file_utils", "get_cache_dir")
+get_documents_dir = _grab("file_utils", "get_documents_dir")
+PluginsController = _grab("com.exteragram.messenger.plugins", "PluginsController")
+JavaFile = _grab("java.io", "File")
 ensure_dir_exists = _grab("file_utils", "ensure_dir_exists")
 write_file_bytes = _grab("file_utils", "write_file_bytes")
 
@@ -155,9 +159,10 @@ STRINGS = {
         "upd_none": "Обновлений нет · установлена %s",
         "upd_ahead": "У вас сборка новее опубликованной: %s (в каталоге %s)",
         "upd_whats_new": "Что нового:",
-        "upd_install": "Установить сейчас",
+        "upd_install": "Перейти на новую версию",
         "upd_downloading": "Скачиваю обновление…",
         "upd_sent": "Файл отправлен в «Избранное» — нажмите на него, чтобы установить",
+        "upd_ready": "Подтвердите установку — плагин заменит себя новой версией",
         "upd_dl_failed": "Не удалось скачать файл, ссылка скопирована",
         "toast_upd_available": "Link Guard: доступна версия %s",
         "upd_title": "Доступна версия %s",
@@ -262,9 +267,10 @@ STRINGS = {
         "upd_none": "No updates · you have %s",
         "upd_ahead": "Your build is newer than the published one: %s (catalog has %s)",
         "upd_whats_new": "What is new:",
-        "upd_install": "Install now",
+        "upd_install": "Get the new version",
         "upd_downloading": "Downloading the update…",
         "upd_sent": "The file was sent to Saved Messages — tap it to install",
+        "upd_ready": "Confirm the install — the plugin will replace itself",
         "upd_dl_failed": "Could not download the file, the link was copied",
         "toast_upd_available": "Link Guard: version %s is available",
         "upd_title": "Version %s is available",
@@ -1038,33 +1044,77 @@ class LinkGuardPlugin(BasePlugin):
             import requests
             resp = requests.get(link, timeout=30,
                                 headers={"User-Agent": "LinkGuard/%s" % __version__})
-            if resp.status_code == 200 and resp.content and get_plugins_dir is not None:
-                folder = str(get_plugins_dir()).rstrip("/\\")
-                ensure_dir_exists(folder)
-                path = "%s/link_guard_%s.plugin" % (folder, remote.replace(".", "_"))
-                write_file_bytes(path, resp.content)
+            if resp.status_code == 200 and resp.content:
+                path = self._store_plugin_file(resp.content, remote)
+            else:
+                self._debug("update: HTTP %s" % resp.status_code)
         except Exception as e:
             log("LinkGuard: download failed: %s" % e)
-            path = None
 
-        sent = False
-        if path and send_document is not None and get_user_config is not None:
+        run_on_ui_thread(lambda: self._finish_download(path, link, remote))
+
+    def _store_plugin_file(self, content, remote):
+        if write_file_bytes is None:
+            return None
+        name = "link_guard_%s.plugin" % str(remote).replace(".", "_")
+        for getter in (get_plugins_dir, get_cache_dir, get_documents_dir):
+            if getter is None:
+                continue
             try:
-                send_document(get_user_config().getClientUserId(), path,
-                              "Link Guard %s" % remote)
-                sent = True
+                folder = str(getter()).rstrip("/" + "\\")
+                if ensure_dir_exists is not None:
+                    ensure_dir_exists(folder)
+                path = "%s/%s" % (folder, name)
+                write_file_bytes(path, content)
+                self._debug("update: файл сохранён в %s" % path)
+                return path
             except Exception as e:
-                log("LinkGuard: send failed: %s" % e)
+                self._debug("update: запись не удалась: %s" % e)
+        return None
 
-        def finish():
-            self._hide_progress()
-            if sent:
-                self._toast(t("upd_sent"))
-            else:
-                copy_to_clipboard(link)
-                self._toast(t("upd_dl_failed"))
+    def _finish_download(self, path, link, remote):
+        self._hide_progress()
+        if not path:
+            copy_to_clipboard(link)
+            self._toast(t("upd_dl_failed"))
+            return
+        if self._launch_install(path):
+            self._toast(t("upd_ready"))
+            return
+        if self._send_to_saved(path, remote):
+            self._toast(t("upd_sent"))
+            return
+        copy_to_clipboard(link)
+        self._toast(t("upd_dl_failed"))
 
-        run_on_ui_thread(finish)
+    def _launch_install(self, path):
+        if PluginsController is None:
+            self._debug("update: PluginsController недоступен")
+            return False
+        fragment = get_last_fragment()
+        if fragment is None:
+            return False
+        try:
+            if JavaFile is not None:
+                if PluginsController.getPluginEngine(JavaFile(path)) is None:
+                    self._debug("update: движок не опознал файл")
+                    return False
+            PluginsController.getInstance().showInstallDialog(fragment, path, True)
+            self._debug("update: открыт диалог установки")
+            return True
+        except Exception as e:
+            log("LinkGuard: install dialog failed: %s" % e)
+            return False
+
+    def _send_to_saved(self, path, remote):
+        if send_document is None or get_user_config is None:
+            return False
+        try:
+            send_document(get_user_config().getClientUserId(), path, "Link Guard %s" % remote)
+            return True
+        except Exception as e:
+            log("LinkGuard: send failed: %s" % e)
+            return False
 
     def _on_check_updates_click(self, *args):
         self._toast(t("toast_checking"))

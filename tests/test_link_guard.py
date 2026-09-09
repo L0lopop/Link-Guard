@@ -646,10 +646,41 @@ check("в тексте есть пункты чейнджлога",
 FakeDialog.last.press("positive")
 check("нажатие запускает загрузку", downloads == [("https://example.com/link_guard.plugin", "9.9.9")],
       downloads)
+check("кнопка ведёт на новую версию, а не на отправку файла",
+      lg.t("upd_install") == "Перейти на новую версию", lg.t("upd_install"))
 check("во время загрузки показан индикатор",
       FakeDialog.last is not None and FakeDialog.last.title == lg.t("upd_downloading"),
       FakeDialog.last.title if FakeDialog.last else None)
 plugin._hide_progress()
+
+print("\nУстановка обновления")
+installs = []
+lg.PluginsController = types.SimpleNamespace(
+    getPluginEngine=lambda f: object(),
+    getInstance=lambda: types.SimpleNamespace(
+        showInstallDialog=lambda fragment, path, enable: installs.append((path, enable))),
+)
+lg.JavaFile = None
+SENT_DOCUMENTS.clear()
+plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin",
+                        "https://example.com/x.plugin", "9.9.9")
+check("открывается штатный диалог установки клиента",
+      installs == [("/tmp/plugins/link_guard_9_9_9.plugin", True)], installs)
+check("файл в «Избранное» при этом не шлём", not SENT_DOCUMENTS, SENT_DOCUMENTS)
+
+lg.PluginsController = None
+plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin",
+                        "https://example.com/x.plugin", "9.9.9")
+check("без установщика остаётся отправка файла", len(SENT_DOCUMENTS) == 1, SENT_DOCUMENTS)
+
+real_send = lg.send_document
+lg.send_document = None
+copied = []
+real_clip = lg.copy_to_clipboard
+lg.copy_to_clipboard = lambda text: copied.append(text)
+plugin._finish_download(None, "https://example.com/x.plugin", "9.9.9")
+check("если файл не скачался — ссылка в буфер", copied == ["https://example.com/x.plugin"], copied)
+lg.send_document, lg.copy_to_clipboard = real_send, real_clip
 
 print("\nЧистка исходящих")
 plugin.set_setting("clean_outgoing", True)
