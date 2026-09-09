@@ -90,6 +90,7 @@ STRINGS = {
         "sw_check_sub": "Разбирает адрес до перехода и предупреждает о подозрительном",
         "sel_mode": "Показывать",
         "mode_suspicious": "При подозрении",
+        "mode_notes": "При замечаниях",
         "mode_always": "Всегда",
         "sw_expand": "Разворачивать короткие ссылки",
         "sw_expand_sub": "Делает сетевой запрос, чтобы узнать конечный адрес",
@@ -205,6 +206,7 @@ STRINGS = {
         "sw_check_sub": "Inspects the address before you follow it and warns about anything odd",
         "sel_mode": "Show",
         "mode_suspicious": "If suspicious",
+        "mode_notes": "If anything noted",
         "mode_always": "Always",
         "sw_expand": "Expand short links",
         "sw_expand_sub": "Makes a network request to reveal the final address",
@@ -797,8 +799,8 @@ class LinkGuardPlugin(BasePlugin):
             Header(text=t("hdr_checks")),
             Switch(key="check_enabled", text=t("sw_check"), default=True,
                    subtext=t("sw_check_sub")),
-            Selector(key="show_mode", text=t("sel_mode"), default=0,
-                     items=[t("mode_suspicious"), t("mode_always")]),
+            Selector(key="show_mode", text=t("sel_mode"), default=1,
+                     items=[t("mode_suspicious"), t("mode_notes"), t("mode_always")]),
             Switch(key="expand_short", text=t("sw_expand"), default=True,
                    subtext=t("sw_expand_sub")),
 
@@ -1226,13 +1228,19 @@ class LinkGuardPlugin(BasePlugin):
 
         verdict = self._cached_analyze(url, self._anchors.get(url))
         try:
-            always = int(self.get_setting("show_mode", 0) or 0) == 1
+            mode = int(self.get_setting("show_mode", 1) or 0)
         except (TypeError, ValueError):
-            always = False
+            mode = 1
         expand_short = bool(self.get_setting("expand_short", True))
         clean_on_open = bool(self.get_setting("clean_on_open", True))
 
-        needs_dialog = (verdict.suspicious or always
+        worth_showing = verdict.suspicious
+        if mode >= 2:
+            worth_showing = True
+        elif mode == 1:
+            worth_showing = worth_showing or bool(verdict.flags)
+
+        needs_dialog = (worth_showing
                         or (verdict.is_shortener and expand_short)) and self._can_dialog()
 
         self._debug("open %s risk=%s dialog=%s arg=%s"

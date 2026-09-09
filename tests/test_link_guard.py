@@ -534,6 +534,37 @@ if handler is not None:
     check("другая ссылка считается", plugin._stat("stats_cleaned") == 3,
           plugin._stat("stats_cleaned"))
 
+print("\nРежимы показа разбора")
+if handler is not None:
+    plugin._cache.clear()
+    plugin._counted.clear()
+    weak = "https://novosti.xyz/article"
+    check("слабое замечание есть, но подозрительной не считается",
+          lg.analyze(weak).flags and not lg.analyze(weak).suspicious, lg.analyze(weak).flags)
+
+    plugin.set_setting("show_mode", 0)
+    param = FakeParam(weak)
+    handler.before_hooked_method(param)
+    check("режим «при подозрении» молчит", not param.cancelled)
+
+    plugin.set_setting("show_mode", 1)
+    param = FakeParam(weak)
+    handler.before_hooked_method(param)
+    check("режим «при замечаниях» показывает разбор", param.cancelled)
+    FakeDialog.last.press("positive")
+
+    plugin.set_setting("show_mode", 1)
+    param = FakeParam("https://ozon.ru/product/1")
+    handler.before_hooked_method(param)
+    check("чистая ссылка в этом режиме открывается молча", not param.cancelled)
+
+    plugin.set_setting("show_mode", 2)
+    param = FakeParam("https://ozon.ru/product/2")
+    handler.before_hooked_method(param)
+    check("режим «всегда» показывает и чистую", param.cancelled)
+    FakeDialog.last.press("positive")
+    plugin.set_setting("show_mode", 1)
+
 print("\nПояснения и лог")
 FakeDialog.last = None
 plugin._on_tags_note()
