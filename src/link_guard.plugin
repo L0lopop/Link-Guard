@@ -123,7 +123,13 @@ STRINGS = {
         "checked_n": "Ссылок проверено: %s",
         "btn_ok": "Понятно",
         "toast_no_links": "Ссылок в сообщении нет",
-        "toast_trusted": "%s добавлен в доверенные",
+        "toast_trusted": "%s больше не проверяется · убрать в Исключениях",
+        "trust_title": "Больше не проверять домен?",
+        "trust_body": "%s перестанет проверяться совсем. Убрать его можно в Настройках → Исключения.",
+        "btn_trust_yes": "Не проверять",
+        "hdr_debug": "Диагностика",
+        "sw_debug": "Подробный лог",
+        "sw_debug_sub": "Записывает, что плагин сделал с каждой ссылкой. Нужен только для разбора проблем",
         "toast_copied": "Не удалось открыть, ссылка скопирована",
         "toast_no_dialog": "Разбор недоступен в этой сборке",
         "toast_blocked": "Link Guard: ссылка выглядит опасной, переход отменён",
@@ -211,7 +217,13 @@ STRINGS = {
         "checked_n": "Links checked: %s",
         "btn_ok": "Got it",
         "toast_no_links": "No links in this message",
-        "toast_trusted": "%s added to trusted",
+        "toast_trusted": "%s is no longer checked · remove it in Exceptions",
+        "trust_title": "Stop checking this domain?",
+        "trust_body": "%s will not be checked at all. You can remove it in Settings → Exceptions.",
+        "btn_trust_yes": "Stop checking",
+        "hdr_debug": "Diagnostics",
+        "sw_debug": "Verbose log",
+        "sw_debug_sub": "Records what the plugin did with every link. Only needed for troubleshooting",
         "toast_copied": "Could not open it, the link was copied",
         "toast_no_dialog": "Breakdown is unavailable in this build",
         "toast_blocked": "Link Guard: the link looks dangerous, opening cancelled",
@@ -743,6 +755,10 @@ class LinkGuardPlugin(BasePlugin):
             Text(text=t("btn_check_now"), subtext=t("version_line", __version__),
                  accent=True, on_click=self._on_check_updates_click),
 
+            Header(text=t("hdr_debug")),
+            Switch(key="debug_log", text=t("sw_debug"), default=False,
+                   subtext=t("sw_debug_sub")),
+
             Divider(),
             Text(text=t("privacy_note")),
         ]
@@ -1049,10 +1065,16 @@ class LinkGuardPlugin(BasePlugin):
         needs_dialog = (verdict.suspicious or always
                         or (verdict.is_shortener and expand_short)) and self._can_dialog()
 
+        self._debug("open %s risk=%s dialog=%s arg=%s"
+                    % (url, verdict.risk, needs_dialog, type(param.args[index]).__name__))
+
         if not needs_dialog:
-            if clean_on_open and verdict.cleaned != url and isinstance(param.args[index], str):
-                param.args[index] = verdict.cleaned
-                self._bump("stats_cleaned", len(verdict.removed_params))
+            if clean_on_open and verdict.cleaned != url:
+                if self._replace_url_arg(param.args, index, verdict.cleaned):
+                    self._bump("stats_cleaned", len(verdict.removed_params))
+                    self._debug("cleaned -> %s" % verdict.cleaned)
+                else:
+                    self._debug("не удалось подставить очищенный адрес")
             return
 
         param.setResult(None)
@@ -1151,8 +1173,7 @@ class LinkGuardPlugin(BasePlugin):
 
         def do_trust(dialog, which):
             dialog.dismiss()
-            self._trust_domain(verdict)
-            self._reopen(method, args, index, target)
+            self._confirm_trust(verdict, method, args, index, target)
 
         if verdict.risk == HIGH:
             builder.set_positive_button(t("btn_cancel"), lambda d, w: d.dismiss())
@@ -1164,8 +1185,24 @@ class LinkGuardPlugin(BasePlugin):
                 builder.set_neutral_button(t("btn_trust"), do_trust)
         builder.show()
 
-    def _trust_domain(self, verdict):
+    def _confirm_trust(self, verdict, method, args, index, target):
         domain = registrable(verdict.display_host or verdict.host)
+        if not domain or not self._can_dialog():
+            return
+
+        def accept(dialog, which):
+            dialog.dismiss()
+            self._trust_domain(domain)
+            self._reopen(method, args, index, target)
+
+        builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
+        builder.set_title(t("trust_title"))
+        builder.set_message(t("trust_body", domain))
+        builder.set_positive_button(t("btn_cancel"), lambda d, w: d.dismiss())
+        builder.set_negative_button(t("btn_trust_yes"), accept)
+        builder.show()
+
+    def _trust_domain(self, domain):
         if not domain:
             return
         raw = (self.get_setting("whitelist", "") or "").strip()
@@ -1176,6 +1213,27 @@ class LinkGuardPlugin(BasePlugin):
         if getattr(self, "_cache", None) is not None:
             self._cache.clear()
         self._toast(t("toast_trusted", domain))
+
+    def _debug(self, message):
+        if self.get_setting("debug_log", False):
+            log("LinkGuard: %s" % message)
+
+    @staticmethod
+    def _replace_url_arg(args, index, url):
+        if index is None or not args:
+            return False
+        current = args[index]
+        if isinstance(current, str):
+            args[index] = url
+            return True
+        try:
+            uri_cls = find_class("android.net.Uri")
+            if uri_cls is not None and getattr(current, "getScheme", None) is not None:
+                args[index] = uri_cls.parse(url)
+                return True
+        except Exception as e:
+            log("LinkGuard: uri replace failed: %s" % e)
+        return False
 
     @staticmethod
     def _context_from(args):
@@ -1224,24 +1282,27 @@ class LinkGuardPlugin(BasePlugin):
         context = self._context_from(args)
 
         if self._open_with_browser(context, url):
+            self._debug("reopen: Browser.openUrl")
             return
 
         if method is not None:
             new_args = list(args or ())
-            if index is not None and new_args and isinstance(new_args[index], str):
-                new_args[index] = url
+            self._replace_url_arg(new_args, index, url)
             try:
                 method.invoke(None, *new_args)
+                self._debug("reopen: invoke varargs")
                 return
             except Exception as e:
                 log("LinkGuard: reopen failed (varargs): %s" % e)
             try:
                 method.invoke(None, new_args)
+                self._debug("reopen: invoke list")
                 return
             except Exception as e:
                 log("LinkGuard: reopen failed (list): %s" % e)
 
         if self._open_with_intent(context, url):
+            self._debug("reopen: intent")
             return
 
         self._bypass.pop(url, None)

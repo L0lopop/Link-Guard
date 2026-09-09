@@ -73,6 +73,18 @@ class FakeMethod:
         self.calls.append(args)
 
 
+class FakeUri:
+
+    def __init__(self, value):
+        self.value = str(value)
+
+    def getScheme(self):
+        return self.value.split(":", 1)[0]
+
+    def __str__(self):
+        return self.value
+
+
 class FakeContext:
     started = []
 
@@ -171,7 +183,12 @@ def install_stubs():
           write_file_bytes=lambda path, data: None)
     _stub("android_utils", log=lambda *a: None, run_on_ui_thread=lambda f, d=0: f(),
           copy_to_clipboard=lambda t: None)
-    _stub("hook_utils", find_class=lambda name: types.SimpleNamespace(name=name))
+    def fake_find_class(name):
+        if name.endswith("Uri"):
+            return types.SimpleNamespace(name=name, parse=FakeUri)
+        return types.SimpleNamespace(name=name)
+
+    _stub("hook_utils", find_class=fake_find_class)
 
 
 def install_minimal_stubs():
@@ -418,10 +435,21 @@ if handler is not None:
     handler.before_hooked_method(param)
     check("подозрительная ссылка остановлена", param.cancelled)
     FakeDialog.last.press("neutral")
-    check("домен попал в белый список",
+    check("доверие спрашивает подтверждение",
+          FakeDialog.last.title == lg.t("trust_title"), FakeDialog.last.title)
+    check("до подтверждения список пуст", not plugin.get_setting("whitelist", ""),
+          plugin.get_setting("whitelist", ""))
+
+    FakeDialog.last.press("positive")
+    check("отказ от подтверждения ничего не меняет",
+          not plugin.get_setting("whitelist", ""), plugin.get_setting("whitelist", ""))
+
+    handler.before_hooked_method(FakeParam("https://promo.example.top/gift?bonus=1"))
+    FakeDialog.last.press("neutral")
+    FakeDialog.last.press("negative")
+    check("домен попал в белый список после подтверждения",
           "example.top" in plugin.get_setting("whitelist", ""),
           plugin.get_setting("whitelist", ""))
-    check("ссылка открыта после доверия", len(param.method.calls) == 1)
 
     again = FakeParam("https://promo.example.top/gift?bonus=2")
     handler.before_hooked_method(again)
