@@ -545,25 +545,19 @@ if handler is not None:
     plugin.set_setting("show_mode", 0)
     param = FakeParam(weak)
     handler.before_hooked_method(param)
-    check("режим «при подозрении» молчит", not param.cancelled)
-
-    plugin.set_setting("show_mode", 1)
-    param = FakeParam(weak)
-    handler.before_hooked_method(param)
-    check("режим «при замечаниях» показывает разбор", param.cancelled)
+    check("слабое замечание поднимает разбор", param.cancelled)
     FakeDialog.last.press("positive")
 
-    plugin.set_setting("show_mode", 1)
     param = FakeParam("https://ozon.ru/product/1")
     handler.before_hooked_method(param)
-    check("чистая ссылка в этом режиме открывается молча", not param.cancelled)
+    check("чистая ссылка открывается молча", not param.cancelled)
 
-    plugin.set_setting("show_mode", 2)
+    plugin.set_setting("show_mode", 1)
     param = FakeParam("https://ozon.ru/product/2")
     handler.before_hooked_method(param)
     check("режим «всегда» показывает и чистую", param.cancelled)
     FakeDialog.last.press("positive")
-    plugin.set_setting("show_mode", 1)
+    plugin.set_setting("show_mode", 0)
 
 print("\nПояснения и лог")
 FakeDialog.last = None
