@@ -116,6 +116,7 @@ def install_stubs():
             self._settings = {}
             self.installed_hooks = hooks_installed
             self.update_hooks = update_hooks
+            self.reloaded = False
 
         def add_hook(self, name, match_substring=False, priority=0):
             update_hooks.append(name)
@@ -125,6 +126,8 @@ def install_stubs():
 
         def set_setting(self, key, value, reload_settings=False):
             self._settings[key] = value
+            if reload_settings:
+                self.reloaded = True
 
         def add_menu_item(self, data):
             return data
@@ -456,6 +459,61 @@ if handler is not None:
     check("доверенный домен больше не тревожит", not again.cancelled)
     plugin.set_setting("whitelist", "")
     plugin._cache.clear()
+
+print("\nСписок исключений")
+for probe, expected in (("https://Example.COM/path?x=1", "example.com"),
+                        ("*.example.com", "example.com"),
+                        ("vk.com/feed", "vk.com"),
+                        ("почта.рф", "почта.рф"),
+                        ("example", ""),
+                        ("не домен", "")):
+    check("нормализация %r" % probe, lg.normalize_domain(probe) == expected,
+          lg.normalize_domain(probe))
+
+plugin.set_setting("whitelist", "")
+plugin.set_setting("whitelist_add", "https://Shop.Example.com/catalog")
+plugin._on_add_domain()
+check("домен добавлен кнопкой", plugin._whitelist_list() == ["shop.example.com"],
+      plugin._whitelist_list())
+check("поле ввода очищено", not plugin.get_setting("whitelist_add", ""),
+      plugin.get_setting("whitelist_add", ""))
+
+plugin.set_setting("whitelist_add", "мусор")
+plugin._on_add_domain()
+check("мусор в список не попадает", plugin._whitelist_list() == ["shop.example.com"],
+      plugin._whitelist_list())
+
+plugin.set_setting("whitelist", "shop.example.com, ozon.ru")
+rows = plugin._exception_rows()
+titles = [getattr(r, "text", None) for r in rows]
+check("каждый домен отдельной строкой",
+      "shop.example.com" in titles and "ozon.ru" in titles, titles)
+check("в конце есть кнопка добавления", lg.t("btn_add") in titles, titles)
+
+remove = plugin._make_remove("ozon.ru")
+FakeDialog.last = None
+remove()
+check("удаление спрашивает подтверждение",
+      FakeDialog.last is not None and FakeDialog.last.title == lg.t("del_title"),
+      FakeDialog.last.title if FakeDialog.last else None)
+FakeDialog.last.press("positive")
+check("отказ оставляет домен", "ozon.ru" in plugin._whitelist_list(), plugin._whitelist_list())
+remove()
+FakeDialog.last.press("negative")
+check("после подтверждения домен удалён", plugin._whitelist_list() == ["shop.example.com"],
+      plugin._whitelist_list())
+
+plugin.set_setting("whitelist", "")
+plugin._cache.clear()
+
+print("\nСброс счётчиков")
+plugin.set_setting("stats_cleaned", 7)
+plugin.set_setting("stats_warned", 3)
+plugin._on_reset_stats_click()
+check("оба счётчика обнулены",
+      plugin._stat("stats_cleaned") == 0 and plugin._stat("stats_warned") == 0,
+      (plugin._stat("stats_cleaned"), plugin._stat("stats_warned")))
+check("экран настроек перерисован", plugin.reloaded, plugin.reloaded)
 
 print("\nСчётчики и кэш")
 plugin.set_setting("stats_cleaned", 0)

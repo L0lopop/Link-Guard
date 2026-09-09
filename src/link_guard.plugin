@@ -96,8 +96,23 @@ STRINGS = {
         "sw_aggr": "Агрессивная чистка",
         "sw_aggr_sub": "Дополнительно режет ref, si, spm, from — редкие ссылки могут перестать работать",
         "hdr_exceptions": "Исключения",
-        "in_whitelist": "Доверенные домены",
-        "in_whitelist_sub": "Через запятую. Для них проверка не выполняется",
+        "in_whitelist": "Новый домен",
+        "in_whitelist_sub": "Впишите адрес и нажмите «Добавить»",
+        "btn_add": "Добавить",
+        "hold_to_delete": "Зажмите, чтобы удалить",
+        "empty_list": "Пока пусто — проверяются все домены",
+        "del_title": "Убрать из исключений?",
+        "del_body": "%s снова будет проверяться перед открытием.",
+        "btn_delete": "Удалить",
+        "toast_added": "%s добавлен в исключения",
+        "toast_removed": "%s снова проверяется",
+        "toast_bad_domain": "Не похоже на домен",
+        "tags_note": "Метки — это хвосты вроде utm_source, fbclid и yclid. По ним рекламные сети "
+                     "узнают, откуда вы пришли и кто прислал вам ссылку, а сам адрес без них "
+                     "работает так же. Плагин срезает их перед открытием.",
+        "sw_notify_clean": "Сообщать о вырезанных метках",
+        "sw_notify_clean_sub": "Короткое уведомление при переходе, если из адреса что-то убрано",
+        "toast_cleaned": "Убрано меток слежения: %s",
         "hdr_stats": "Статистика",
         "stats_line": "Вырезано меток: %s · Предупреждений: %s",
         "stats_reset": "Сбросить счётчики",
@@ -190,8 +205,23 @@ STRINGS = {
         "sw_aggr": "Aggressive cleaning",
         "sw_aggr_sub": "Also strips ref, si, spm, from — a few sites may break",
         "hdr_exceptions": "Exceptions",
-        "in_whitelist": "Trusted domains",
-        "in_whitelist_sub": "Comma-separated. These are never checked",
+        "in_whitelist": "New domain",
+        "in_whitelist_sub": "Type an address and tap «Add»",
+        "btn_add": "Add",
+        "hold_to_delete": "Long-press to remove",
+        "empty_list": "Empty — every domain is checked",
+        "del_title": "Remove from exceptions?",
+        "del_body": "%s will be checked before opening again.",
+        "btn_delete": "Remove",
+        "toast_added": "%s added to exceptions",
+        "toast_removed": "%s is checked again",
+        "toast_bad_domain": "That does not look like a domain",
+        "tags_note": "Tags are tails such as utm_source, fbclid and yclid. Ad networks use them to "
+                     "learn where you came from and who sent you the link; the address works the "
+                     "same without them. The plugin strips them before opening.",
+        "sw_notify_clean": "Notify about stripped tags",
+        "sw_notify_clean_sub": "A short notice on opening when something was removed from the address",
+        "toast_cleaned": "Tracking tags removed: %s",
         "hdr_stats": "Statistics",
         "stats_line": "Tags removed: %s · Warnings shown: %s",
         "stats_reset": "Reset counters",
@@ -463,6 +493,23 @@ def anchor_domain(text):
     if "." not in host:
         return ""
     return registrable(host)
+
+
+def normalize_domain(text):
+    value = str(text).strip().lower()
+    if not value:
+        return ""
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    value = value.split("/")[0].split("?")[0].split("#")[0]
+    if "@" in value:
+        value = value.split("@")[-1]
+    value = value.split(":")[0].strip().strip(".").lstrip("*.")
+    if not value or " " in value:
+        return ""
+    if not re.fullmatch(r"[a-z0-9\-._~Ѐ-ӿ]+\.[a-zЀ-ӿ]{2,}", value):
+        return ""
+    return decode_idna(value)
 
 
 def clean_url(url, aggressive=False):
@@ -741,13 +788,14 @@ class LinkGuardPlugin(BasePlugin):
             Switch(key="aggressive", text=t("sw_aggr"), default=False,
                    subtext=t("sw_aggr_sub")),
 
-            Header(text=t("hdr_exceptions")),
-            Input(key="whitelist", text=t("in_whitelist"), default="",
-                  subtext=t("in_whitelist_sub")),
+        ] + self._exception_rows() + [
 
             Header(text=t("hdr_stats")),
             Text(text=t("stats_line", self._stat("stats_cleaned"), self._stat("stats_warned")),
                  subtext=t("stats_reset"), on_click=self._on_reset_stats_click),
+            Text(text=t("tags_note")),
+            Switch(key="notify_clean", text=t("sw_notify_clean"), default=False,
+                   subtext=t("sw_notify_clean_sub")),
 
             Header(text=t("hdr_updates")),
             Switch(key="check_updates", text=t("sw_updates"), default=True,
@@ -763,9 +811,82 @@ class LinkGuardPlugin(BasePlugin):
             Text(text=t("privacy_note")),
         ]
 
-    def _whitelist(self):
+    def _exception_rows(self):
+        rows = [Header(text=t("hdr_exceptions"))]
+        domains = self._whitelist_list()
+        if domains:
+            for domain in domains:
+                rows.append(Text(text=domain, subtext=t("hold_to_delete"),
+                                 on_click=self._make_hint(),
+                                 on_long_click=self._make_remove(domain)))
+        else:
+            rows.append(Text(text=t("empty_list")))
+        rows.append(Input(key="whitelist_add", text=t("in_whitelist"), default="",
+                          subtext=t("in_whitelist_sub")))
+        rows.append(Text(text=t("btn_add"), accent=True, on_click=self._on_add_domain))
+        return rows
+
+    def _make_hint(self):
+        def handler(*args):
+            self._toast(t("hold_to_delete"))
+            return True
+        return handler
+
+    def _make_remove(self, domain):
+        def handler(*args):
+            self._ask_remove(domain)
+            return True
+        return handler
+
+    def _ask_remove(self, domain):
+        if not self._can_dialog():
+            self._remove_domain(domain)
+            return
+
+        def accept(dialog, which):
+            dialog.dismiss()
+            self._remove_domain(domain)
+
+        builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
+        builder.set_title(t("del_title"))
+        builder.set_message(t("del_body", domain))
+        builder.set_positive_button(t("btn_cancel"), lambda d, w: d.dismiss())
+        builder.set_negative_button(t("btn_delete"), accept)
+        builder.show()
+
+    def _remove_domain(self, domain):
+        domains = [d for d in self._whitelist_list() if d != domain]
+        self._save_whitelist(domains)
+        self._toast(t("toast_removed", domain))
+
+    def _on_add_domain(self, *args):
+        domain = normalize_domain(self.get_setting("whitelist_add", "") or "")
+        if not domain:
+            self._toast(t("toast_bad_domain"))
+            return
+        domains = self._whitelist_list()
+        if domain not in domains:
+            domains.append(domain)
+        self.set_setting("whitelist_add", "")
+        self._save_whitelist(domains)
+        self._toast(t("toast_added", domain))
+
+    def _save_whitelist(self, domains):
+        if getattr(self, "_cache", None) is not None:
+            self._cache.clear()
+        self.set_setting("whitelist", ", ".join(domains), reload_settings=True)
+
+    def _whitelist_list(self):
         raw = self.get_setting("whitelist", "") or ""
-        return {p.strip().lower().lstrip("*.") for p in re.split(r"[,\s]+", raw) if p.strip()}
+        seen = []
+        for part in re.split(r"[,\s]+", raw):
+            item = part.strip().lower().lstrip("*.")
+            if item and item not in seen:
+                seen.append(item)
+        return seen
+
+    def _whitelist(self):
+        return set(self._whitelist_list())
 
     def _aggressive(self):
         return bool(self.get_setting("aggressive", False))
@@ -782,7 +903,7 @@ class LinkGuardPlugin(BasePlugin):
 
     def _on_reset_stats_click(self, *args):
         self.set_setting("stats_cleaned", 0)
-        self.set_setting("stats_warned", 0)
+        self.set_setting("stats_warned", 0, reload_settings=True)
         self._toast(t("stats_done"))
 
     def _maybe_check_updates(self):
@@ -1071,8 +1192,11 @@ class LinkGuardPlugin(BasePlugin):
         if not needs_dialog:
             if clean_on_open and verdict.cleaned != url:
                 if self._replace_url_arg(param.args, index, verdict.cleaned):
-                    self._bump("stats_cleaned", len(verdict.removed_params))
+                    removed = len(verdict.removed_params)
+                    self._bump("stats_cleaned", removed)
                     self._debug("cleaned -> %s" % verdict.cleaned)
+                    if removed and self.get_setting("notify_clean", False):
+                        run_on_ui_thread(lambda: self._toast(t("toast_cleaned", removed)))
                 else:
                     self._debug("не удалось подставить очищенный адрес")
             return
@@ -1205,13 +1329,10 @@ class LinkGuardPlugin(BasePlugin):
     def _trust_domain(self, domain):
         if not domain:
             return
-        raw = (self.get_setting("whitelist", "") or "").strip()
-        current = [p for p in re.split(r"[,\s]+", raw) if p]
-        if domain not in current:
-            current.append(domain)
-            self.set_setting("whitelist", ", ".join(current))
-        if getattr(self, "_cache", None) is not None:
-            self._cache.clear()
+        domains = self._whitelist_list()
+        if domain not in domains:
+            domains.append(domain)
+        self._save_whitelist(domains)
         self._toast(t("toast_trusted", domain))
 
     def _debug(self, message):
