@@ -662,14 +662,14 @@ lg.PluginsController = types.SimpleNamespace(
 )
 lg.JavaFile = None
 SENT_DOCUMENTS.clear()
-plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin",
+plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin", "",
                         "https://example.com/x.plugin", "9.9.9")
 check("открывается штатный диалог установки клиента",
       installs == [("/tmp/plugins/link_guard_9_9_9.plugin", True)], installs)
 check("файл в «Избранное» при этом не шлём", not SENT_DOCUMENTS, SENT_DOCUMENTS)
 
 lg.PluginsController = None
-plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin",
+plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin", "",
                         "https://example.com/x.plugin", "9.9.9")
 check("без установщика остаётся отправка файла", len(SENT_DOCUMENTS) == 1, SENT_DOCUMENTS)
 
@@ -678,7 +678,7 @@ lg.send_document = None
 copied = []
 real_clip = lg.copy_to_clipboard
 lg.copy_to_clipboard = lambda text: copied.append(text)
-plugin._finish_download(None, "https://example.com/x.plugin", "9.9.9")
+plugin._finish_download(None, "нет доступной папки", "https://example.com/x.plugin", "9.9.9")
 check("если файл не скачался — ссылка в буфер", copied == ["https://example.com/x.plugin"], copied)
 lg.send_document, lg.copy_to_clipboard = real_send, real_clip
 
@@ -721,7 +721,15 @@ check("новая версия предложена",
 
 FakeDialog.last = None
 plugin._check_updates(manual=False)
-check("о той же версии второй раз не напоминает", FakeDialog.last is None)
+check("версия запомнена для показа при следующем запуске",
+      plugin.get_setting("update_version", "") == "9.9.9",
+      plugin.get_setting("update_version", ""))
+FakeDialog.last = None
+plugin._maybe_check_updates()
+check("при запуске окно показывается снова, пока не обновились",
+      FakeDialog.last is not None and "9.9.9" in (FakeDialog.last.title or ""),
+      FakeDialog.last.title if FakeDialog.last else None)
+plugin.set_setting("update_version", "")
 
 lg.fetch_update_info = lambda timeout=8: {"version": "0.0.1"}
 FakeDialog.last = None
