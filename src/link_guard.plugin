@@ -6,6 +6,7 @@ __version__ = "1.2.1"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
+import os
 import re
 import threading
 import time
@@ -82,8 +83,6 @@ get_cache_dir = _grab("file_utils", "get_cache_dir")
 get_documents_dir = _grab("file_utils", "get_documents_dir")
 PluginsController = _grab("com.exteragram.messenger.plugins", "PluginsController")
 JavaFile = _grab("java.io", "File")
-ensure_dir_exists = _grab("file_utils", "ensure_dir_exists")
-write_file_bytes = _grab("file_utils", "write_file_bytes")
 
 
 STRINGS = {
@@ -164,6 +163,7 @@ STRINGS = {
         "upd_sent": "Файл отправлен в «Избранное» — нажмите на него, чтобы установить",
         "upd_ready": "Подтвердите установку — плагин заменит себя новой версией",
         "upd_dl_failed": "Не удалось скачать файл, ссылка скопирована",
+        "upd_dl_why": "Не удалось скачать: %s",
         "toast_upd_available": "Link Guard: доступна версия %s",
         "upd_title": "Доступна версия %s",
         "upd_body": "Установлена %s.\n\n%s\n\n%s",
@@ -272,6 +272,7 @@ STRINGS = {
         "upd_sent": "The file was sent to Saved Messages — tap it to install",
         "upd_ready": "Confirm the install — the plugin will replace itself",
         "upd_dl_failed": "Could not download the file, the link was copied",
+        "upd_dl_why": "Download failed: %s",
         "toast_upd_available": "Link Guard: version %s is available",
         "upd_title": "Version %s is available",
         "upd_body": "You have %s.\n\n%s\n\n%s",
@@ -938,6 +939,15 @@ class LinkGuardPlugin(BasePlugin):
     def _maybe_check_updates(self):
         if not self.get_setting("check_updates", True):
             return
+
+        known = str(self.get_setting("update_version", "") or "")
+        if known and parse_version(known) > parse_version(__version__):
+            info = {"version": known,
+                    "changelog": self.get_setting("update_changelog", "") or "",
+                    "url": self.get_setting("update_url", "") or REPO_URL}
+            run_on_ui_thread(lambda: self._show_update(info, known))
+            return
+
         try:
             last = float(self.get_setting("update_checked_at", 0) or 0)
         except (TypeError, ValueError):
@@ -978,9 +988,12 @@ class LinkGuardPlugin(BasePlugin):
                 run_on_ui_thread(lambda: self._toast(text))
             return
 
-        if not manual and self.get_setting("update_notified", "") == remote:
-            return
-        self.set_setting("update_notified", remote)
+        raw_log = info.get("changelog", "")
+        if isinstance(raw_log, (list, tuple)):
+            raw_log = chr(10).join(str(i) for i in raw_log)
+        self.set_setting("update_version", remote)
+        self.set_setting("update_changelog", str(raw_log))
+        self.set_setting("update_url", str(info.get("url") or REPO_URL))
         run_on_ui_thread(lambda: self._show_update(info, remote))
 
     @staticmethod
@@ -1039,44 +1052,69 @@ class LinkGuardPlugin(BasePlugin):
                 pass
 
     def _download_update(self, link, remote):
-        path = None
+        path, reason = None, ""
         try:
             import requests
             resp = requests.get(link, timeout=30,
                                 headers={"User-Agent": "LinkGuard/%s" % __version__})
             if resp.status_code == 200 and resp.content:
-                path = self._store_plugin_file(resp.content, remote)
+                path, reason = self._store_plugin_file(resp.content, remote)
             else:
-                self._debug("update: HTTP %s" % resp.status_code)
+                reason = "HTTP %s" % resp.status_code
         except Exception as e:
+            reason = str(e)
             log("LinkGuard: download failed: %s" % e)
 
-        run_on_ui_thread(lambda: self._finish_download(path, link, remote))
+        run_on_ui_thread(lambda: self._finish_download(path, reason, link, remote))
 
-    def _store_plugin_file(self, content, remote):
-        if write_file_bytes is None:
-            return None
-        name = "link_guard_%s.plugin" % str(remote).replace(".", "_")
+    def _writable_dirs(self):
+        found = []
         for getter in (get_plugins_dir, get_cache_dir, get_documents_dir):
             if getter is None:
                 continue
             try:
-                folder = str(getter()).rstrip("/" + "\\")
-                if ensure_dir_exists is not None:
-                    ensure_dir_exists(folder)
-                path = "%s/%s" % (folder, name)
-                write_file_bytes(path, content)
-                self._debug("update: файл сохранён в %s" % path)
-                return path
+                value = str(getter() or "").rstrip("/")
+                if value:
+                    found.append(value)
             except Exception as e:
-                self._debug("update: запись не удалась: %s" % e)
-        return None
+                self._debug("update: каталог недоступен: %s" % e)
+        try:
+            loader = find_class("org.telegram.messenger.ApplicationLoader")
+            if loader is not None:
+                found.append(str(loader.applicationContext.getCacheDir().getAbsolutePath()))
+        except Exception as e:
+            self._debug("update: кэш приложения недоступен: %s" % e)
+        try:
+            import tempfile
+            found.append(tempfile.gettempdir())
+        except Exception:
+            pass
+        return [f for f in dict.fromkeys(found) if f]
 
-    def _finish_download(self, path, link, remote):
+    def _store_plugin_file(self, content, remote):
+        name = "link_guard_%s.plugin" % str(remote).replace(".", "_")
+        problems = []
+        for folder in self._writable_dirs():
+            path = os.path.join(folder, name)
+            try:
+                if not os.path.isdir(folder):
+                    os.makedirs(folder, exist_ok=True)
+                with open(path, "wb") as handle:
+                    handle.write(content)
+                if os.path.exists(path) and os.path.getsize(path) == len(content):
+                    self._debug("update: файл сохранён в %s" % path)
+                    return path, ""
+                problems.append("файл записан не полностью")
+            except Exception as e:
+                problems.append(str(e))
+                self._debug("update: запись в %s не удалась: %s" % (path, e))
+        return None, "; ".join(problems[:2]) or "нет доступной папки"
+
+    def _finish_download(self, path, reason, link, remote):
         self._hide_progress()
         if not path:
             copy_to_clipboard(link)
-            self._toast(t("upd_dl_failed"))
+            self._toast(t("upd_dl_why", (reason or "неизвестно")[:70]))
             return
         if self._launch_install(path):
             self._toast(t("upd_ready"))
