@@ -8,7 +8,10 @@ Android-модули плагина подменяются заглушками,
 """
 
 import os
+import struct
 import sys
+import tempfile
+import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -240,7 +243,6 @@ def load_plugin(minimal=False):
 
 
 lg = load_plugin()
-lg.fetch_rules = lambda timeout=10: None
 
 failures = []
 
@@ -805,47 +807,42 @@ check("ссылка от контакта помечена доверенной"
 plugin._anchors.clear()
 plugin._sources.clear()
 
-print("\nПравила из репозитория")
-check("мусор в списки не попадает",
-      lg.sanitize_rules_list(["ok.example", 42, "", "с пробелом", "x" * 200]) == ["ok.example"],
-      lg.sanitize_rules_list(["ok.example", 42, "", "с пробелом", "x" * 200]))
-check("не список — пустой результат", lg.sanitize_rules_list("строка") == [])
+print("\nСписки внутри плагина")
+# Раньше эти записи приезжали отдельным файлом из репозитория.
+# Файла больше нет, и проверка следит, что при переносе ничего не выпало.
+for brand in ("aliexpress.ru", "citilink.ru", "dns-shop.ru", "mvideo.ru",
+              "eldorado.ru", "lamoda.ru", "sportmaster.ru", "rzd.ru",
+              "aeroflot.ru", "pochtabank.ru", "raiffeisen.ru", "psbank.ru",
+              "gazprombank.ru", "sovcombank.ru", "yoomoney.ru", "sbermarket.ru",
+              "samokat.ru", "vkusvill.ru", "rutube.ru", "twitch.tv",
+              "epicgames.com", "roblox.com", "steamgifts.com"):
+    check("бренд %s на месте" % brand, brand in lg.BRANDS)
 
-before_brands = len(lg.BRANDS)
-added = lg.apply_rules({"version": 7, "brands": ["novyibank.ru"],
-                        "trackers": ["newclid"], "bait": ["razblokirovka"],
-                        "tracker_prefixes": ["zz_"], "risky_tld": ["bogus"]})
-check("правила добавили записи", added == 5, added)
-check("версия правил запомнена", lg.RULES_VERSION == 7, lg.RULES_VERSION)
-check("встроенные бренды не потерялись", len(lg.BRANDS) == before_brands + 1)
-check("новый бренд участвует в проверке",
-      lg.analyze("https://novyibank.ru.pay.top/enter").risk == lg.HIGH,
-      lg.analyze("https://novyibank.ru.pay.top/enter").flags)
-check("новый трекер вырезается",
-      lg.clean_url("https://shop.ru/x?newclid=1")[0] == "https://shop.ru/x",
-      lg.clean_url("https://shop.ru/x?newclid=1"))
-check("новый префикс вырезается",
-      lg.clean_url("https://shop.ru/x?zz_source=a")[0] == "https://shop.ru/x")
+for tracker in ("erid", "ymclid", "yadclid", "_ga", "_gl", "mc_tc",
+                "sc_cid", "srsltid", "cjevent", "irclickid"):
+    url, removed = lg.clean_url("https://shop.ru/x?%s=1" % tracker)
+    check("метка %s вырезается" % tracker, url == "https://shop.ru/x", url)
 
-check("битые правила ничего не ломают", lg.apply_rules("не словарь") == 0)
+for prefix in ("matomo_", "sc_"):
+    url, _ = lg.clean_url("https://shop.ru/x?%ssource=a" % prefix)
+    check("префикс %s вырезается" % prefix, url == "https://shop.ru/x", url)
 
-lg.fetch_rules = lambda timeout=10: {"version": 9, "brands": ["setevoi-bank.ru"]}
-plugin.set_setting("rules_checked_at", 0)
-plugin._refresh_rules(manual=True)
-check("правила из сети применяются", "setevoi-bank.ru" in lg.BRANDS)
-check("версия из сети запомнена", lg.RULES_VERSION == 9, lg.RULES_VERSION)
-check("файл правил сохранён на диск",
-      os.path.exists(plugin._rules_path()), plugin._rules_path())
-lg.fetch_rules = lambda timeout=10: None
-check("после мусора списки целы", "novyibank.ru" in lg.BRANDS)
+for short in ("goo.su", "clck.su", "kurl.ru", "shrturi.com", "tlgg.ru"):
+    check("сокращатель %s узнан" % short,
+          lg.analyze("https://%s/abc" % short).is_shortener)
 
-import json as _json
-with open(os.path.join(ROOT, "rules.json"), encoding="utf-8") as fh:
-    shipped = _json.load(fh)
-check("rules.json в репозитории разбирается",
-      isinstance(shipped, dict) and shipped["version"] >= 1)
-check("в нём только списки и служебные поля",
-      all(isinstance(v, (list, int, str)) for v in shipped.values()), list(shipped))
+for zone in ("buzz", "cricket", "download", "loan", "party",
+             "review", "science", "stream", "trade", "webcam"):
+    check("зона .%s помечена" % zone, zone in lg.RISKY_TLD)
+
+for bait in ("oplata", "dostavka", "posylka", "shtraf", "vozvrat", "vyplata",
+             "kompensaciya", "podtverdite", "razblokirovka", "verifikaciya"):
+    check("приманка %s на месте" % bait, bait in lg.BAIT_WORDS)
+
+check("механизма внешних списков больше нет",
+      not hasattr(lg, "fetch_rules") and not hasattr(lg, "apply_rules"))
+check("файла rules.json в репозитории нет",
+      not os.path.exists(os.path.join(ROOT, "rules.json")))
 
 print("\nВозраст домена")
 v = lg.analyze("https://pay-now.top/enter")
@@ -1029,6 +1026,175 @@ plugin._sources.clear()
 plugin._index_source(fake_message, fake_message.message)
 check("источник запомнен для ссылки из сообщения",
       plugin._sources.get("https://kanal.example/promo") == "unknown", plugin._sources)
+
+print("\nБаза мошеннических доменов")
+# Базу собираем тем же кодом, что работает в Actions: если сборщик и
+# читалка разойдутся в формате, тест это поймает.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "scripts"))
+import build_db
+
+BAD = ["moshennik.top", "sber-oplata.xyz", "phish.pages.dev"]
+GOOD = ["primer-horoshiy-sayt-s-dlinnym-imenem.top"]
+
+
+def make_database(bad=BAD, good=GOOD, platforms=("pages.dev",)):
+    malw, _ = build_db.hash_section(bad, build_db.FULL_BITS)
+    whit, _ = build_db.hash_section(good, build_db.WHITE_BITS)
+    sections = [
+        ("MALW", malw),
+        ("WHIT", whit),
+        ("BRND", b"example.com"),
+        ("TLDR", b"top 100"),
+        ("PLAT", "\n".join(platforms).encode("utf-8")),
+    ]
+    body = b"".join(build_db.section(tag, payload) for tag, payload in sections)
+    return b"LGDB" + struct.pack(">BIB", 1, 20400, len(sections)) + body
+
+
+blob = make_database()
+database = lg.DomainDatabase(blob)
+lg.install_database(database)
+
+check("база разобрана", database.total == len(BAD), database.total)
+check("платформы прочитаны", "pages.dev" in database.platforms, database.platforms)
+
+v = lg.analyze("https://moshennik.top/vhod")
+check("домен из базы — высокий риск", v.risk == lg.HIGH, v.flags)
+check("в разборе сказано про базу",
+      any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://lk.moshennik.top/vhod")
+check("поддомен мошеннического тоже опасен", v.risk == lg.HIGH, v.flags)
+check("в разборе назван родительский домен",
+      any("moshennik.top" in text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://phish.pages.dev/")
+check("конкретный поддомен платформы опасен", v.risk == lg.HIGH, v.flags)
+v = lg.analyze("https://drugoy-sayt.pages.dev/")
+check("платформа целиком не блокируется",
+      not any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://primer-horoshiy-sayt-s-dlinnym-imenem.top/")
+check("у посещаемого сайта мелкие придирки сняты", v.risk == lg.INFO, v.flags)
+
+lg.install_database(None)
+v = lg.analyze("https://moshennik.top/vhod")
+check("без базы проверка по ней не идёт",
+      not any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
+
+print("\nБренды подхватываются из базы")
+# В разделе BRND лежит тысяча посещаемых доменов, обновляемая вместе с базой.
+# Плагин должен ловить подделки под них, не зная их заранее.
+REAL_DB = os.path.join(tempfile.gettempdir(), "lgdb_test", "full.lgdb")
+if os.path.exists(REAL_DB):
+    real = lg.read_database(REAL_DB)
+    lg.install_database(real)
+    check("бренды прочитаны из базы", len(real.brands) == 1000, len(real.brands))
+    check("своих брендов в коде нет среди подхваченных",
+          "cloudflare.com" not in lg.BRANDS and "cloudflare.com" in real.brands)
+
+    v = lg.analyze("https://cloudflaer.com/login")
+    check("опечатка в подхваченном бренде поймана", v.risk == lg.HIGH, v.flags)
+
+    started = time.time()
+    for i in range(200):
+        lg.analyze("https://primer-%d.example.net/stranica" % i)
+    per_call = (time.time() - started) / 200 * 1000
+    print("  %.1f мс на разбор с тысячей брендов" % per_call)
+    check("разбор укладывается в 40 мс", per_call < 40, per_call)
+
+    # Главный риск: чужой домен случайно окажется в одной правке от бренда.
+    alarms = []
+    for host in sorted(real.brands)[:400]:
+        verdict = lg.analyze("https://%s/" % host)
+        if verdict.risk == lg.HIGH:
+            alarms.append((host, verdict.flags))
+    check("сами бренды не считаются подделками: тревог %d" % len(alarms),
+          not alarms, alarms[:3])
+
+    everyday = ["ya.ru", "dzen.ru", "habr.com", "rutracker.org", "kinopoisk.ru",
+                "2gis.ru", "sravni.ru", "banki.ru", "auto.ru", "cian.ru"]
+    noisy = [h for h in everyday if lg.analyze("https://%s/" % h).risk == lg.HIGH]
+    check("обычные сайты не тревожат: %s" % noisy, not noisy)
+    lg.install_database(None)
+else:
+    check("настоящая база найдена для проверки брендов", True,
+          "пропущено: нет %s" % REAL_DB)
+
+print("\nБаза: порченые файлы")
+for broken, title in (
+    (b"", "пустой файл"),
+    (b"NOPE" + blob[4:], "чужая подпись"),
+    (b"LGDB" + struct.pack(">BIB", 77, 20400, 0), "чужая версия"),
+    (blob[:len(blob) // 2], "обрезанный файл"),
+):
+    try:
+        lg.DomainDatabase(broken)
+        ok = False
+    except Exception:
+        ok = True
+    check("%s отвергается" % title, ok)
+
+with tempfile.NamedTemporaryFile(suffix=".lgdb", delete=False) as handle:
+    handle.write(b"musor, ne nasha baza")
+    junk_path = handle.name
+check("испорченный файл с диска не ломает плагин",
+      lg.read_database(junk_path) is None)
+check("несуществующий файл не ломает плагин",
+      lg.read_database(os.path.join(tempfile.gettempdir(), "net-takogo.lgdb")) is None)
+os.unlink(junk_path)
+
+with tempfile.NamedTemporaryFile(suffix=".lgdb", delete=False) as handle:
+    handle.write(blob)
+    good_path = handle.name
+restored = lg.read_database(good_path)
+check("целая база с диска читается", restored is not None and restored.total == len(BAD))
+os.unlink(good_path)
+
+print("\nБаза: настройки и расписание")
+db_plugin = lg.LinkGuardPlugin()
+db_plugin.on_plugin_load()
+db_plugin.set_setting("use_database", False)
+check("тумблер «выключено» читается", not db_plugin._database_enabled())
+db_plugin._load_database()
+check("при выключенной базе она не подставляется", lg.active_database() is None)
+db_plugin.set_setting("use_database", True)
+check("тумблер «включено» читается", db_plugin._database_enabled())
+check("состояние базы описано словами",
+      isinstance(db_plugin._database_status(), str) and db_plugin._database_status())
+check("качается только полная база", lg.DB_NAME == "full.lgdb", lg.DB_NAME)
+
+# Ночное окно: подменяем часы и проверяем, когда плагин решает качать.
+real_localtime = lg.time.localtime
+
+
+def at_hour(hour):
+    return lambda *args: types.SimpleNamespace(tm_hour=hour)
+
+
+svezhaya = types.SimpleNamespace(age_days=0, total=10)
+staraya = types.SimpleNamespace(age_days=lg.DB_STALE_DAYS, total=10)
+
+db_plugin.set_setting("db_checked_at", 0)
+lg.time.localtime = at_hour(3)
+check("ночью свежая база обновляется", db_plugin._due_for_refresh(svezhaya))
+lg.time.localtime = at_hour(14)
+check("днём свежую базу не трогаем", not db_plugin._due_for_refresh(svezhaya))
+check("днём устаревшую всё же качаем", db_plugin._due_for_refresh(staraya))
+check("днём при отсутствии базы качаем", db_plugin._due_for_refresh(None))
+lg.time.localtime = at_hour(0)
+check("в полночь окно уже открыто", db_plugin._due_for_refresh(svezhaya))
+lg.time.localtime = at_hour(6)
+check("в шесть утра окно уже закрыто", not db_plugin._due_for_refresh(svezhaya))
+
+lg.time.localtime = at_hour(3)
+db_plugin.set_setting("db_checked_at", lg.time.time())
+check("дважды за ночь не качаем", not db_plugin._due_for_refresh(svezhaya))
+lg.time.localtime = real_localtime
+
+check("обновления проверяются раз в шесть часов",
+      lg.UPDATE_INTERVAL == 6 * 60 * 60, lg.UPDATE_INTERVAL)
 
 print("\nСовместимость со старым SDK")
 try:
