@@ -2,7 +2,7 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
@@ -68,23 +68,45 @@ except Exception:
     def find_class(name):
         return None
 
-def _grab(module_name, attribute):
-    try:
-        module = __import__(module_name, fromlist=[attribute])
-        return getattr(module, attribute, None)
-    except Exception:
-        return None
+# Каждое имя импортируется отдельно: в разных сборках клиента набор
+# доступных функций отличается, и отсутствие одной не должно ронять остальные.
+try:
+    from client_utils import get_user_config
+except ImportError:
+    get_user_config = None
+
+try:
+    from client_utils import get_messages_controller
+except ImportError:
+    get_messages_controller = None
+
+try:
+    from file_utils import get_plugins_dir
+except ImportError:
+    get_plugins_dir = None
+
+try:
+    from file_utils import get_cache_dir
+except ImportError:
+    get_cache_dir = None
+
+try:
+    from file_utils import get_documents_dir
+except ImportError:
+    get_documents_dir = None
+
+try:
+    from com.exteragram.messenger.plugins import PluginsController
+except ImportError:
+    PluginsController = None
+
+try:
+    from java.io import File as JavaFile
+except ImportError:
+    JavaFile = None
 
 
-send_document = _grab("client_utils", "send_document")
-get_user_config = _grab("client_utils", "get_user_config")
-get_plugins_dir = _grab("file_utils", "get_plugins_dir")
-get_cache_dir = _grab("file_utils", "get_cache_dir")
-get_documents_dir = _grab("file_utils", "get_documents_dir")
-PluginsController = _grab("com.exteragram.messenger.plugins", "PluginsController")
-JavaFile = _grab("java.io", "File")
-
-
+# Все видимые строки собраны в одном месте: так их проще править и переводить.
 STRINGS = {
     "ru": {
         "hdr_checks": "Проверка ссылок",
@@ -160,7 +182,6 @@ STRINGS = {
         "upd_whats_new": "Что нового:",
         "upd_install": "Перейти на новую версию",
         "upd_downloading": "Скачиваю обновление…",
-        "upd_sent": "Файл отправлен в «Избранное» — нажмите на него, чтобы установить",
         "upd_ready": "Подтвердите установку — плагин заменит себя новой версией",
         "upd_dl_failed": "Не удалось скачать файл, ссылка скопирована",
         "upd_dl_why": "Не удалось скачать: %s",
@@ -176,10 +197,18 @@ STRINGS = {
         "f_punycode": "Домен записан в punycode и выглядит как «%s»",
         "f_mixed": "В домене смешаны разные алфавиты (%s) — типичная маскировка",
         "f_lookalike": "Домен визуально копирует %s подменёнными символами",
-        "f_typo": "Домен отличается от %s всего на %s символ(а)",
+        "f_typo": "Домен отличается от %s всего на %s %s",
         "f_subdomain": "«%s» стоит в поддомене, а сам сайт — %s",
         "f_anchor": "В сообщении ссылка подписана как %s, а ведёт на %s",
         "f_ip": "Вместо домена IP-адрес",
+        "f_ip_local": "Адрес в локальной сети",
+        "lbl_age": "Возраст домена: %s",
+        "age_today": "меньше суток",
+        "unit_day": "день|дня|дней",
+        "unit_week": "неделя|недели|недель",
+        "unit_month": "месяц|месяца|месяцев",
+        "unit_year": "год|года|лет",
+        "unit_char": "символ|символа|символов",
         "f_badport": "После двоеточия стоит не номер порта — адрес сломан или замаскирован",
         "f_port": "Нестандартный порт %s",
         "f_tld": "Доменная зона .%s часто используется для одноразовых мошеннических сайтов",
@@ -189,6 +218,18 @@ STRINGS = {
         "f_exec": "Ссылка ведёт на файл %s — это установка программы, а не сайт",
         "f_short": "Сокращённая ссылка — настоящий адрес скрыт",
         "f_hops": "Редиректов по пути: %s",
+        "f_age_new": "Домену всего %s — свежая регистрация",
+        "f_age_young": "Домен зарегистрирован %s назад",
+        "src_stranger": "Ссылка из чужого чата или канала",
+        "src_trusted": "Ссылка от вашего контакта",
+        "sw_age": "Узнавать возраст домена",
+        "sw_age_sub": "Для подозрительных ссылок спрашивает дату регистрации у rdap.org — домен уходит на сторонний сервис",
+        "sw_rules": "Пополнять списки из репозитория",
+        "sw_rules_sub": "Раз в сутки подтягивает новые бренды и трекеры. Правила только добавляют проверки",
+        "rules_line": "Списки правил: версия %s",
+        "rules_sub": "Нажмите, чтобы обновить сейчас",
+        "rules_updated": "Списки обновлены: версия %s",
+        "rules_none": "Списки не обновились",
         "scripts_LATIN": "латиница",
         "scripts_CYRILLIC": "кириллица",
         "scripts_GREEK": "греческий",
@@ -269,7 +310,6 @@ STRINGS = {
         "upd_whats_new": "What is new:",
         "upd_install": "Get the new version",
         "upd_downloading": "Downloading the update…",
-        "upd_sent": "The file was sent to Saved Messages — tap it to install",
         "upd_ready": "Confirm the install — the plugin will replace itself",
         "upd_dl_failed": "Could not download the file, the link was copied",
         "upd_dl_why": "Download failed: %s",
@@ -285,10 +325,18 @@ STRINGS = {
         "f_punycode": "The domain is punycode and actually reads as «%s»",
         "f_mixed": "The domain mixes alphabets (%s) — a classic disguise",
         "f_lookalike": "The domain imitates %s using look-alike characters",
-        "f_typo": "The domain differs from %s by just %s character(s)",
+        "f_typo": "The domain differs from %s by just %s %s",
         "f_subdomain": "«%s» sits in a subdomain while the site itself is %s",
         "f_anchor": "The message labels this link as %s, but it leads to %s",
         "f_ip": "An IP address instead of a domain",
+        "f_ip_local": "An address on your local network",
+        "lbl_age": "Domain age: %s",
+        "age_today": "less than a day",
+        "unit_day": "day|days|days",
+        "unit_week": "week|weeks|weeks",
+        "unit_month": "month|months|months",
+        "unit_year": "year|years|years",
+        "unit_char": "character|characters|characters",
         "f_badport": "What follows the colon is not a port number — the address is broken or disguised",
         "f_port": "Non-standard port %s",
         "f_tld": "The .%s zone is often used for throwaway scam sites",
@@ -298,6 +346,18 @@ STRINGS = {
         "f_exec": "The link points to a %s file — that installs software, it is not a website",
         "f_short": "Shortened link — the real address is hidden",
         "f_hops": "Redirects along the way: %s",
+        "f_age_new": "The domain is only %s old",
+        "f_age_young": "The domain was registered %s ago",
+        "src_stranger": "The link comes from a stranger or a channel",
+        "src_trusted": "The link comes from your contact",
+        "sw_age": "Look up domain age",
+        "sw_age_sub": "Asks rdap.org for the registration date of suspicious domains — the domain leaves your device",
+        "sw_rules": "Update lists from the repository",
+        "sw_rules_sub": "Pulls new brands and trackers once a day. Rules can only add checks",
+        "rules_line": "Rule lists: version %s",
+        "rules_sub": "Tap to update now",
+        "rules_updated": "Lists updated: version %s",
+        "rules_none": "Lists were not updated",
         "scripts_LATIN": "Latin",
         "scripts_CYRILLIC": "Cyrillic",
         "scripts_GREEK": "Greek",
@@ -310,76 +370,290 @@ STRINGS = {
 LANG = "ru"
 
 
-def t(key, *args):
+def phrase(key, *args):
     table = STRINGS.get(LANG) or STRINGS["en"]
     text = table.get(key) or STRINGS["en"].get(key) or key
     return text % args if args else text
 
 
+# Параметры слежки, которые режем всегда — ни один сайт от их потери не ломается.
 TRACKER_EXACT = {
-    "fbclid", "gclid", "gbraid", "wbraid", "dclid", "msclkid", "twclid",
-    "ttclid", "igshid", "igsh", "yclid", "ysclid", "_openstat", "mkt_tok",
-    "vero_id", "vero_conv", "mc_cid", "mc_eid", "oly_anon_id", "oly_enc_id",
-    "hsCtaTracking", "__hssc", "__hstc", "__hsfp", "_hsenc", "_hsmi",
-    "wickedid", "rb_clickid", "s_cid", "epik", "otc", "cvid",
+    "fbclid",
+    "gclid",
+    "gbraid",
+    "wbraid",
+    "dclid",
+    "msclkid",
+    "twclid",
+    "ttclid",
+    "igshid",
+    "igsh",
+    "yclid",
+    "ysclid",
+    "_openstat",
+    "mkt_tok",
+    "vero_id",
+    "vero_conv",
+    "mc_cid",
+    "mc_eid",
+    "oly_anon_id",
+    "oly_enc_id",
+    "hsCtaTracking",
+    "__hssc",
+    "__hstc",
+    "__hsfp",
+    "_hsenc",
+    "_hsmi",
+    "wickedid",
+    "rb_clickid",
+    "s_cid",
+    "epik",
+    "otc",
+    "cvid",
 }
 
 TRACKER_PREFIXES = ("utm_", "pk_", "mtm_", "piwik_", "hsa_", "at_custom", "stm_")
 
+# Эти режем только в агрессивном режиме: иногда они несут смысл.
 TRACKER_AGGRESSIVE = {
-    "ref", "referer", "referrer", "ref_src", "ref_url", "si", "spm", "scm",
-    "from", "source", "share_source", "share_medium", "share_plat",
-    "_branch_match_id", "feature", "trk", "trkCampaign",
+    "ref",
+    "referer",
+    "referrer",
+    "ref_src",
+    "ref_url",
+    "si",
+    "spm",
+    "scm",
+    "from",
+    "source",
+    "share_source",
+    "share_medium",
+    "share_plat",
+    "_branch_match_id",
+    "feature",
+    "trk",
+    "trkCampaign",
 }
 
 SHORTENERS = {
-    "bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "is.gd", "buff.ly",
-    "cutt.ly", "rb.gy", "shorturl.at", "clck.ru", "vk.cc", "surl.li", "u.to",
-    "qps.ru", "clc.to", "gg.gg", "tiny.cc", "shorte.st", "lnkd.in", "s.id",
-    "rebrand.ly", "t.ly", "short.io", "l.ead.me", "dfl.to",
+    "bit.ly",
+    "tinyurl.com",
+    "goo.gl",
+    "t.co",
+    "ow.ly",
+    "is.gd",
+    "buff.ly",
+    "cutt.ly",
+    "rb.gy",
+    "shorturl.at",
+    "clck.ru",
+    "vk.cc",
+    "surl.li",
+    "u.to",
+    "qps.ru",
+    "clc.to",
+    "gg.gg",
+    "tiny.cc",
+    "shorte.st",
+    "lnkd.in",
+    "s.id",
+    "rebrand.ly",
+    "t.ly",
+    "short.io",
+    "l.ead.me",
+    "dfl.to",
 }
 
+# Домены, под которые чаще всего маскируются. Сравниваем расстоянием Левенштейна.
 BRANDS = {
-    "telegram.org", "t.me", "telegram.me", "fragment.com", "walletbot.me",
-    "google.com", "gmail.com", "youtube.com", "instagram.com", "facebook.com",
-    "whatsapp.com", "discord.com", "steampowered.com", "steamcommunity.com",
-    "github.com", "apple.com", "icloud.com", "microsoft.com", "office.com",
-    "binance.com", "bybit.com", "metamask.io", "trustwallet.com",
-    "vk.com", "ok.ru", "mail.ru", "yandex.ru", "dzen.ru", "avito.ru",
-    "ozon.ru", "wildberries.ru", "sberbank.ru", "sbrf.ru", "tinkoff.ru",
-    "tbank.ru", "alfabank.ru", "vtb.ru", "gosuslugi.ru", "nalog.gov.ru",
-    "cdek.ru", "pochta.ru", "megafon.ru", "beeline.ru", "mts.ru",
+    "telegram.org",
+    "t.me",
+    "telegram.me",
+    "fragment.com",
+    "walletbot.me",
+    "google.com",
+    "gmail.com",
+    "youtube.com",
+    "instagram.com",
+    "facebook.com",
+    "whatsapp.com",
+    "discord.com",
+    "steampowered.com",
+    "steamcommunity.com",
+    "github.com",
+    "apple.com",
+    "icloud.com",
+    "microsoft.com",
+    "office.com",
+    "binance.com",
+    "bybit.com",
+    "metamask.io",
+    "trustwallet.com",
+    "vk.com",
+    "ok.ru",
+    "mail.ru",
+    "yandex.ru",
+    "dzen.ru",
+    "avito.ru",
+    "ozon.ru",
+    "wildberries.ru",
+    "sberbank.ru",
+    "sbrf.ru",
+    "tinkoff.ru",
+    "tbank.ru",
+    "alfabank.ru",
+    "vtb.ru",
+    "gosuslugi.ru",
+    "nalog.gov.ru",
+    "cdek.ru",
+    "pochta.ru",
+    "megafon.ru",
+    "beeline.ru",
+    "mts.ru",
 }
 
-GENERIC_LABELS = {"mail", "office", "post", "link", "click", "wallet"}
+# Слишком общие слова: встречаются в поддоменах честных сайтов (mail.company.com).
+GENERIC_LABELS = {
+    "mail",
+    "office",
+    "post",
+    "link",
+    "click",
+    "wallet",
+}
 
+# Зоны, где доля мошеннических доменов исторически высокая.
 RISKY_TLD = {
-    "zip", "mov", "top", "xyz", "icu", "cfd", "sbs", "cyou", "click", "link",
-    "rest", "quest", "monster", "bar", "beauty", "makeup", "skin", "hair",
-    "boats", "autos", "lol", "gdn", "tk", "ml", "ga", "cf", "gq",
+    "zip",
+    "mov",
+    "top",
+    "xyz",
+    "icu",
+    "cfd",
+    "sbs",
+    "cyou",
+    "click",
+    "link",
+    "rest",
+    "quest",
+    "monster",
+    "bar",
+    "beauty",
+    "makeup",
+    "skin",
+    "hair",
+    "boats",
+    "autos",
+    "lol",
+    "gdn",
+    "tk",
+    "ml",
+    "ga",
+    "cf",
+    "gq",
 }
 
+# Слова-приманки в адресе. Сами по себе не улика, но в сумме с прочим — сигнал.
 BAIT_WORDS = (
-    "login", "signin", "verify", "confirm", "secure", "account", "update",
-    "wallet", "seed", "recovery", "airdrop", "giveaway", "bonus", "promo",
-    "gift", "premium-free", "nft-claim", "podarok", "vyigrysh", "bonus-ru",
+    "login",
+    "signin",
+    "verify",
+    "confirm",
+    "secure",
+    "account",
+    "update",
+    "wallet",
+    "seed",
+    "recovery",
+    "airdrop",
+    "giveaway",
+    "bonus",
+    "promo",
+    "gift",
+    "premium-free",
+    "nft-claim",
+    "podarok",
+    "vyigrysh",
+    "bonus-ru",
 )
 
-DANGEROUS_EXT = (".apk", ".exe", ".msi", ".scr", ".bat", ".cmd", ".jar", ".vbs", ".apks", ".xapk")
+DANGEROUS_EXT = (
+    ".apk",
+    ".exe",
+    ".msi",
+    ".scr",
+    ".bat",
+    ".cmd",
+    ".jar",
+    ".vbs",
+    ".apks",
+    ".xapk",
+)
 
-DANGEROUS_SCHEMES = {"javascript", "data", "file", "intent", "content", "jar"}
-
-CONFUSABLES = {
-    "а": "a", "б": "b", "в": "b", "е": "e", "ё": "e", "к": "k", "м": "m",
-    "н": "h", "о": "o", "р": "p", "с": "c", "т": "t", "у": "y", "х": "x",
-    "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ԛ": "q", "ԝ": "w", "ɡ": "g",
-    "ο": "o", "α": "a", "ν": "v", "ρ": "p", "ϲ": "c", "τ": "t", "υ": "u",
+DANGEROUS_SCHEMES = {
+    "javascript",
+    "data",
+    "file",
+    "intent",
+    "content",
+    "jar",
 }
 
+# Кириллица и греческий, неотличимые от латиницы в большинстве шрифтов.
+LOOKALIKE_LETTERS = {
+    "а": "a",
+    "б": "b",
+    "в": "b",
+    "е": "e",
+    "ё": "e",
+    "к": "k",
+    "м": "m",
+    "н": "h",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "т": "t",
+    "у": "y",
+    "х": "x",
+    "і": "i",
+    "ј": "j",
+    "ѕ": "s",
+    "ԁ": "d",
+    "ԛ": "q",
+    "ԝ": "w",
+    "ɡ": "g",
+    "ο": "o",
+    "α": "a",
+    "ν": "v",
+    "ρ": "p",
+    "ϲ": "c",
+    "τ": "t",
+    "υ": "u",
+}
+
+# Двухуровневые суффиксы, чтобы правильно вычислять регистрируемый домен.
 TWO_LEVEL_TLD = {
-    "co.uk", "org.uk", "ac.uk", "gov.uk", "co.jp", "com.br", "com.au",
-    "com.tr", "com.ua", "com.cn", "co.kr", "co.in", "com.mx", "gov.ru",
-    "org.ru", "net.ru", "com.ru", "edu.ru", "ac.ru", "pp.ua", "in.ua",
+    "co.uk",
+    "org.uk",
+    "ac.uk",
+    "gov.uk",
+    "co.jp",
+    "com.br",
+    "com.au",
+    "com.tr",
+    "com.ua",
+    "com.cn",
+    "co.kr",
+    "co.in",
+    "com.mx",
+    "gov.ru",
+    "org.ru",
+    "net.ru",
+    "com.ru",
+    "edu.ru",
+    "ac.ru",
+    "pp.ua",
+    "in.ua",
 }
 
 URL_RE = re.compile(
@@ -391,6 +665,54 @@ ANCHOR_RE = re.compile(
     r"^(?:https?://)?([a-z0-9\-._~Ѐ-ӿ]+\.[a-zЀ-ӿ]{2,})(?:[/?#:]|$)",
     re.IGNORECASE,
 )
+
+LINE_BREAK = "\n"
+
+IP_RE = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+DOMAIN_RE = re.compile(r"[a-z0-9\-.]+\.[a-zЀ-ӿ]{2,}")
+
+
+def is_private_ip(host):
+    """Адреса домашней сети: тревожиться из-за своего роутера незачем."""
+    try:
+        first, second = (int(part) for part in host.split(".")[:2])
+    except (TypeError, ValueError):
+        return False
+    return (first == 10 or first == 127 or (first == 192 and second == 168)
+            or (first == 172 and 16 <= second <= 31)
+            or (first == 169 and second == 254))
+
+
+def plural_form(forms, count):
+    """Русские числительные: 1 день, 2 дня, 5 дней, 11 дней."""
+    one, few, many = (str(forms).split("|") + ["", ""])[:3]
+    tail = abs(int(count)) % 100
+    if 11 <= tail <= 14:
+        return many
+    tail %= 10
+    if tail == 1:
+        return one
+    if 2 <= tail <= 4:
+        return few
+    return many
+
+
+def amount(count, unit_key):
+    return "%d %s" % (count, plural_form(phrase(unit_key), count))
+
+
+def human_age(days):
+    """Возраст домена словами: сутки, недели, месяцы или годы."""
+    if days < 1:
+        return phrase("age_today")
+    if days < 14:
+        return amount(days, "unit_day")
+    if days < 60:
+        return amount(days // 7, "unit_week")
+    if days < 730:
+        return amount(days // 30, "unit_month")
+    return amount(days // 365, "unit_year")
+
 
 HIGH, MEDIUM, LOW, INFO = "high", "medium", "low", "info"
 _RISK_ORDER = {INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3}
@@ -412,20 +734,24 @@ class Verdict:
         self.is_shortener = False
         self.host = ""
         self.display_host = ""
+        self.source = None
+        self.age_days = None
 
     def add(self, level, text):
         self.flags.append((level, text))
 
     def clone(self):
-        c = Verdict(self.original)
-        c.cleaned = self.cleaned
-        c.final = self.final
-        c.flags = list(self.flags)
-        c.removed_params = list(self.removed_params)
-        c.is_shortener = self.is_shortener
-        c.host = self.host
-        c.display_host = self.display_host
-        return c
+        copy = Verdict(self.original)
+        copy.cleaned = self.cleaned
+        copy.final = self.final
+        copy.flags = list(self.flags)
+        copy.removed_params = list(self.removed_params)
+        copy.is_shortener = self.is_shortener
+        copy.host = self.host
+        copy.display_host = self.display_host
+        copy.source = self.source
+        copy.age_days = self.age_days
+        return copy
 
     @property
     def risk(self):
@@ -438,21 +764,22 @@ class Verdict:
         return _RISK_ORDER[self.risk] >= _RISK_ORDER[MEDIUM]
 
 
-def levenshtein(a, b):
-    if a == b:
+def levenshtein(left, right):
+    if left == right:
         return 0
-    if not a or not b:
-        return max(len(a), len(b))
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
+    if not left or not right:
+        return max(len(left), len(right))
+    prev = list(range(len(right) + 1))
+    for i, ca in enumerate(left, 1):
         cur = [i]
-        for j, cb in enumerate(b, 1):
+        for j, cb in enumerate(right, 1):
             cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
         prev = cur
     return prev[-1]
 
 
 def registrable(host):
+    """Домен, который реально кто-то зарегистрировал, с учётом co.uk и подобных."""
     parts = host.split(".")
     if len(parts) < 2:
         return host
@@ -486,11 +813,24 @@ def scripts_of(text):
     return found
 
 
-def defuse_confusables(host):
-    return "".join(CONFUSABLES.get(ch, ch) for ch in host.lower())
+def to_latin_lookalike(host):
+    """Приводим обманки к латинице, чтобы поймать sbеrbank.ru с кириллической «е»."""
+    return "".join(LOOKALIKE_LETTERS.get(ch, ch) for ch in host.lower())
+
+
+def slice_utf16(text, offset, length):
+    """Telegram считает смещения в единицах UTF-16: эмодзи до ссылки сдвигает индексы."""
+    if not length:
+        return ""
+    try:
+        units = text.encode("utf-16-le")
+        return units[offset * 2:(offset + length) * 2].decode("utf-16-le", "ignore")
+    except Exception:
+        return text[offset:offset + length]
 
 
 def anchor_domain(text):
+    """Домен из подписи ссылки, если подпись вообще похожа на адрес."""
     if not text:
         return ""
     candidate = text.strip().strip("<>()[]«»\"'").rstrip(".,;:!?")
@@ -504,6 +844,7 @@ def anchor_domain(text):
 
 
 def normalize_domain(text):
+    """Приводит введённое пользователем к виду example.com или возвращает пустую строку."""
     value = str(text).strip().lower()
     if not value:
         return ""
@@ -521,6 +862,7 @@ def normalize_domain(text):
 
 
 def clean_url(url, aggressive=False):
+    """Убирает трекинг-параметры. Возвращает (чистый_url, список_убранного)."""
     try:
         parts = urlsplit(url)
     except Exception:
@@ -548,62 +890,63 @@ def clean_url(url, aggressive=False):
 
 
 def analyze(url, aggressive=False, whitelist=(), anchor=None):
-    v = Verdict(url)
+    verdict = Verdict(url)
 
     try:
         raw = urlsplit(url)
     except Exception:
-        v.add(HIGH, t("f_unparsable"))
-        return v
+        verdict.add(HIGH, phrase("f_unparsable"))
+        return verdict
 
     scheme = (raw.scheme or "").lower()
     if scheme in DANGEROUS_SCHEMES:
-        v.add(HIGH, t("f_scheme", scheme))
-        return v
+        verdict.add(HIGH, phrase("f_scheme", scheme))
+        return verdict
     if scheme not in ("", "http", "https", "ftp"):
-        return v
+        return verdict
 
     probe = url if "://" in url else "http://" + url
     try:
         parts = urlsplit(probe)
         host = (parts.hostname or "").lower()
     except Exception:
-        v.add(HIGH, t("f_unparsable"))
-        return v
+        verdict.add(HIGH, phrase("f_unparsable"))
+        return verdict
 
-    v.host = host
-    v.display_host = decode_idna(host)
+    verdict.host = host
+    verdict.display_host = decode_idna(host)
 
     if not host:
-        v.add(MEDIUM, t("f_nodomain"))
-        return v
+        verdict.add(MEDIUM, phrase("f_nodomain"))
+        return verdict
 
     reg = registrable(host)
     if reg in whitelist or host in whitelist:
-        v.cleaned, v.removed_params = clean_url(url, aggressive)
-        return v
+        verdict.cleaned, verdict.removed_params = clean_url(url, aggressive)
+        return verdict
 
     if parts.username or "@" in parts.netloc:
-        v.add(HIGH, t("f_userinfo", host))
+        verdict.add(HIGH, phrase("f_userinfo", host))
 
-    shown = v.display_host
+    shown = verdict.display_host
     if shown != host:
-        v.add(LOW, t("f_punycode", shown))
+        verdict.add(LOW, phrase("f_punycode", shown))
     scripts = scripts_of(shown)
     if len(scripts) > 1:
-        names = sorted(t("scripts_" + s) for s in scripts)
-        v.add(HIGH, t("f_mixed", ", ".join(names)))
+        names = sorted(phrase("scripts_" + s) for s in scripts)
+        verdict.add(HIGH, phrase("f_mixed", ", ".join(names)))
 
-    defused = defuse_confusables(shown)
+    defused = to_latin_lookalike(shown)
     defused_reg = registrable(defused)
     if defused_reg != reg and defused_reg in BRANDS:
-        v.add(HIGH, t("f_lookalike", defused_reg))
+        verdict.add(HIGH, phrase("f_lookalike", defused_reg))
     elif defused_reg not in BRANDS:
         for brand in sorted(BRANDS):
             dist = levenshtein(defused_reg, brand)
             limit = 1 if len(brand) < 10 else 2
             if 1 <= dist <= limit and abs(len(defused_reg) - len(brand)) <= 2:
-                v.add(HIGH, t("f_typo", brand, dist))
+                verdict.add(HIGH, phrase("f_typo", brand, dist,
+                                        plural_form(phrase("unit_char"), dist)))
                 break
 
     if reg not in BRANDS:
@@ -613,55 +956,165 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
             if len(head) < 5 or head in GENERIC_LABELS:
                 continue
             if head in labels[:-2]:
-                v.add(HIGH, t("f_subdomain", head, reg))
+                verdict.add(HIGH, phrase("f_subdomain", head, reg))
                 break
 
     shown_as = anchor_domain(anchor)
     if shown_as and shown_as != reg and shown_as != registrable(shown):
-        v.add(HIGH, t("f_anchor", shown_as, reg))
+        verdict.add(HIGH, phrase("f_anchor", shown_as, reg))
 
-    if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", host):
-        v.add(MEDIUM, t("f_ip"))
+    if IP_RE.fullmatch(host):
+        verdict.add(LOW if is_private_ip(host) else MEDIUM,
+              phrase("f_ip_local") if is_private_ip(host) else phrase("f_ip"))
     try:
         port = parts.port
     except ValueError:
         port = None
-        v.add(MEDIUM, t("f_badport"))
+        verdict.add(MEDIUM, phrase("f_badport"))
     if port and port not in (80, 443):
-        v.add(LOW, t("f_port", port))
+        verdict.add(LOW, phrase("f_port", port))
 
     tld = host.rsplit(".", 1)[-1]
     if tld in RISKY_TLD:
-        v.add(LOW, t("f_tld", tld))
+        verdict.add(LOW, phrase("f_tld", tld))
 
     if host.count(".") >= 4:
-        v.add(LOW, t("f_deep"))
+        verdict.add(LOW, phrase("f_deep"))
     if len(host) > 40:
-        v.add(LOW, t("f_long"))
+        verdict.add(LOW, phrase("f_long"))
 
     lowered = (host + parts.path).lower()
     hits = [w for w in BAIT_WORDS if w in lowered]
     if hits:
-        level = MEDIUM if v.flags else LOW
-        v.add(level, t("f_bait", ", ".join(hits[:3])))
+        level = MEDIUM if verdict.flags else LOW
+        verdict.add(level, phrase("f_bait", ", ".join(hits[:3])))
 
     path_low = parts.path.lower()
     for ext in DANGEROUS_EXT:
         if path_low.endswith(ext):
-            v.add(HIGH, t("f_exec", ext))
+            verdict.add(HIGH, phrase("f_exec", ext))
             break
 
     if reg in SHORTENERS or host in SHORTENERS:
-        v.is_shortener = True
-        v.add(INFO, t("f_short"))
+        verdict.is_shortener = True
+        verdict.add(INFO, phrase("f_short"))
 
-    v.cleaned, v.removed_params = clean_url(url, aggressive)
-    return v
+    verdict.cleaned, verdict.removed_params = clean_url(url, aggressive)
+    return verdict
 
 
 REPO_URL = "https://github.com/L0lopop/Link-Guard"
 UPDATE_URL = "https://raw.githubusercontent.com/L0lopop/Link-Guard/main/update.json"
 UPDATE_INTERVAL = 24 * 60 * 60
+
+# Списки пополняются файлом из репозитория: новые бренды и метки не требуют выпуска версии.
+RULES_URL = "https://raw.githubusercontent.com/L0lopop/Link-Guard/main/rules.json"
+RULES_INTERVAL = 24 * 60 * 60
+RULES_MAX_ITEMS = 2000
+RULES_MAX_LEN = 80
+RULES_VERSION = 0
+
+# RDAP отдаёт дату регистрации домена бесплатно и без ключей.
+RDAP_URL = "https://rdap.org/domain/%s"
+AGE_ALARM_DAYS = 30
+AGE_NOTE_DAYS = 120
+AGE_CACHE_MAX = 200
+AGE_CACHE_TTL = 7 * 24 * 60 * 60
+
+
+def sanitize_rules_list(value):
+    """Пропускаем только короткие строки без пробелов — остальное отбрасываем."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    clean = []
+    for item in list(value)[:RULES_MAX_ITEMS]:
+        if not isinstance(item, str):
+            continue
+        text = item.strip().lower()
+        if text and len(text) <= RULES_MAX_LEN and " " not in text:
+            clean.append(text)
+    return clean
+
+
+def apply_rules(data):
+    """Правила только добавляют проверки: отключить защиту через них нельзя."""
+    global TRACKER_PREFIXES, BAIT_WORDS, RULES_VERSION
+    if not isinstance(data, dict):
+        return 0
+
+    added = 0
+    for key, target in (("brands", BRANDS), ("trackers", TRACKER_EXACT),
+                        ("shorteners", SHORTENERS), ("risky_tld", RISKY_TLD),
+                        ("generic_labels", GENERIC_LABELS)):
+        for item in sanitize_rules_list(data.get(key)):
+            if item not in target:
+                target.add(item)
+                added += 1
+
+    fresh = [p for p in sanitize_rules_list(data.get("tracker_prefixes"))
+             if p not in TRACKER_PREFIXES]
+    if fresh:
+        TRACKER_PREFIXES = tuple(TRACKER_PREFIXES) + tuple(fresh)
+        added += len(fresh)
+
+    fresh = [b for b in sanitize_rules_list(data.get("bait")) if b not in BAIT_WORDS]
+    if fresh:
+        BAIT_WORDS = tuple(BAIT_WORDS) + tuple(fresh)
+        added += len(fresh)
+
+    try:
+        RULES_VERSION = int(data.get("version", 0) or 0)
+    except (TypeError, ValueError):
+        RULES_VERSION = 0
+    return added
+
+
+def add_age_flag(verdict, days):
+    if days is None:
+        return
+    verdict.age_days = days
+    if days <= AGE_ALARM_DAYS:
+        verdict.add(HIGH if verdict.flags else MEDIUM, phrase("f_age_new", days))
+    elif days <= AGE_NOTE_DAYS:
+        verdict.add(LOW, phrase("f_age_young", days))
+
+
+def fetch_rules(timeout=10):
+    try:
+        import requests
+        resp = requests.get(RULES_URL, timeout=timeout,
+                            params={"ts": int(time.time())},
+                            headers={"User-Agent": "LinkGuard/%s" % __version__,
+                                     "Cache-Control": "no-cache"})
+        if resp.status_code != 200 or len(resp.content) > 512 * 1024:
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        log("LinkGuard: rules fetch failed: %s" % e)
+        return None
+
+
+def domain_age_days(domain, timeout=8):
+    """Возраст домена в днях по данным RDAP. None — узнать не удалось."""
+    try:
+        import datetime
+        import requests
+        resp = requests.get(RDAP_URL % domain, timeout=timeout,
+                            headers={"User-Agent": "LinkGuard/%s" % __version__,
+                                     "Accept": "application/rdap+json"})
+        if resp.status_code != 200:
+            log("LinkGuard: rdap %s HTTP %s" % (domain, resp.status_code))
+            return None
+        for event in resp.json().get("events", []) or []:
+            if str(event.get("eventAction", "")).lower() != "registration":
+                continue
+            stamp = str(event.get("eventDate", ""))[:10]
+            born = datetime.date(int(stamp[0:4]), int(stamp[5:7]), int(stamp[8:10]))
+            return (datetime.date.today() - born).days
+    except Exception as e:
+        log("LinkGuard: rdap failed: %s" % e)
+    return None
 
 
 def parse_version(text):
@@ -738,13 +1191,16 @@ class LinkGuardPlugin(BasePlugin):
         self._progress = None
         self._counted = {}
         self._stats = {}
+        self._sources = {}
+        self._ages = {}
 
-        self._install_open_url_hook()
-        self._install_update_hook()
-        self.add_on_send_message_hook()
+        self._step("rules", self._load_rules)
+        self._step("openUrl", self._install_open_url_hook)
+        self._step("updates", self._install_update_hook)
+        self._step("sendHook", self.add_on_send_message_hook)
 
         if HAS_MENU:
-            self._register_menu()
+            self._step("menu", self._register_menu)
         else:
             log("LinkGuard: меню сообщений недоступно в этом SDK")
         self._maybe_check_updates()
@@ -767,7 +1223,7 @@ class LinkGuardPlugin(BasePlugin):
     def _register_menu(self):
         self._menu_check = self.add_menu_item(MenuItemData(
             menu_type=MenuItemType.MESSAGE_CONTEXT_MENU,
-            text=t("menu_check"),
+            text=phrase("menu_check"),
             icon="msg_info",
             subtext="Link Guard",
             priority=5,
@@ -775,7 +1231,7 @@ class LinkGuardPlugin(BasePlugin):
         ))
         self._menu_copy = self.add_menu_item(MenuItemData(
             menu_type=MenuItemType.MESSAGE_CONTEXT_MENU,
-            text=t("menu_copy"),
+            text=phrase("menu_copy"),
             icon="msg_copy",
             priority=4,
             on_click=self.on_menu_copy,
@@ -785,60 +1241,67 @@ class LinkGuardPlugin(BasePlugin):
         if not HAS_SETTINGS:
             return []
         return [
-            Header(text=t("hdr_checks")),
-            Switch(key="check_enabled", text=t("sw_check"), default=True,
-                   subtext=t("sw_check_sub")),
-            Selector(key="show_mode", text=t("sel_mode"), default=0,
-                     items=[t("mode_suspicious"), t("mode_always")]),
-            Switch(key="expand_short", text=t("sw_expand"), default=True,
-                   subtext=t("sw_expand_sub")),
+            Header(text=phrase("hdr_checks")),
+            Switch(key="check_enabled", text=phrase("sw_check"), default=True,
+                   subtext=phrase("sw_check_sub")),
+            Selector(key="show_mode", text=phrase("sel_mode"), default=0,
+                     items=[phrase("mode_suspicious"), phrase("mode_always")]),
+            Switch(key="expand_short", text=phrase("sw_expand"), default=True,
+                   subtext=phrase("sw_expand_sub")),
 
-            Header(text=t("hdr_tracker")),
-            Switch(key="clean_on_open", text=t("sw_clean_open"), default=True,
-                   subtext=t("sw_clean_open_sub")),
-            Switch(key="clean_outgoing", text=t("sw_clean_out"), default=False,
-                   subtext=t("sw_clean_out_sub")),
-            Switch(key="aggressive", text=t("sw_aggr"), default=False,
-                   subtext=t("sw_aggr_sub")),
+            Header(text=phrase("hdr_tracker")),
+            Switch(key="clean_on_open", text=phrase("sw_clean_open"), default=True,
+                   subtext=phrase("sw_clean_open_sub")),
+            Switch(key="clean_outgoing", text=phrase("sw_clean_out"), default=False,
+                   subtext=phrase("sw_clean_out_sub")),
+            Switch(key="aggressive", text=phrase("sw_aggr"), default=False,
+                   subtext=phrase("sw_aggr_sub")),
 
         ] + self._exception_rows() + [
 
-            Header(text=t("hdr_stats")),
-            Text(text=t("stats_line", self._stat("stats_cleaned")),
-                 subtext=t("stats_sub", self._stat("stats_warned")),
+            Header(text=phrase("hdr_stats")),
+            Text(text=phrase("stats_line", self._stat("stats_cleaned")),
+                 subtext=phrase("stats_sub", self._stat("stats_warned")),
                  on_click=self._on_reset_stats_click),
-            Text(text=t("tags_title"), subtext=t("read_more"), on_click=self._on_tags_note),
+            Text(text=phrase("tags_title"), subtext=phrase("read_more"), on_click=self._on_tags_note),
 
-            Header(text=t("hdr_updates")),
-            Switch(key="check_updates", text=t("sw_updates"), default=True,
-                   subtext=t("sw_updates_sub")),
-            Text(text=t("btn_check_now"), subtext=t("version_line", __version__),
+            Switch(key="check_age", text=phrase("sw_age"), default=False,
+                   subtext=phrase("sw_age_sub")),
+
+            Header(text=phrase("hdr_updates")),
+            Switch(key="check_updates", text=phrase("sw_updates"), default=True,
+                   subtext=phrase("sw_updates_sub")),
+            Switch(key="use_rules", text=phrase("sw_rules"), default=True,
+                   subtext=phrase("sw_rules_sub")),
+            Text(text=phrase("rules_line", RULES_VERSION), subtext=phrase("rules_sub"),
+                 on_click=self._on_refresh_rules_click),
+            Text(text=phrase("btn_check_now"), subtext=phrase("version_line", __version__),
                  accent=True, on_click=self._on_check_updates_click),
 
             Divider(),
-            Text(text=t("privacy_title"), subtext=t("read_more"),
+            Text(text=phrase("privacy_title"), subtext=phrase("read_more"),
                  on_click=self._on_privacy_note),
         ]
 
     def _exception_rows(self):
-        rows = [Header(text=t("hdr_exceptions"))]
+        rows = [Header(text=phrase("hdr_exceptions"))]
         domains = self._whitelist_list()
         if domains:
             for domain in domains:
-                rows.append(Text(text=domain, subtext=t("hold_to_delete"),
+                rows.append(Text(text=domain, subtext=phrase("hold_to_delete"),
                                  on_click=self._make_hint(),
                                  on_long_click=self._make_remove(domain)))
         else:
-            rows.append(Text(text=t("empty_list"), subtext=t("empty_list_sub")))
-        rows.append(Input(key="whitelist_add", text=t("in_whitelist"),
+            rows.append(Text(text=phrase("empty_list"), subtext=phrase("empty_list_sub")))
+        rows.append(Input(key="whitelist_add", text=phrase("in_whitelist"),
                           default=self.get_setting("whitelist_add", "") or "",
-                          subtext=t("in_whitelist_sub")))
-        rows.append(Text(text=t("btn_add"), accent=True, on_click=self._on_add_domain))
+                          subtext=phrase("in_whitelist_sub")))
+        rows.append(Text(text=phrase("btn_add"), accent=True, on_click=self._on_add_domain))
         return rows
 
     def _make_hint(self):
         def handler(*args):
-            self._toast(t("hold_to_delete"))
+            self._toast(phrase("hold_to_delete"))
             return True
         return handler
 
@@ -858,28 +1321,28 @@ class LinkGuardPlugin(BasePlugin):
             self._remove_domain(domain)
 
         builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
-        builder.set_title(t("del_title"))
-        builder.set_message(t("del_body", domain))
-        builder.set_positive_button(t("btn_cancel"), lambda d, w: d.dismiss())
-        builder.set_negative_button(t("btn_delete"), accept)
+        builder.set_title(phrase("del_title"))
+        builder.set_message(phrase("del_body", domain))
+        builder.set_positive_button(phrase("btn_cancel"), lambda d, w: d.dismiss())
+        builder.set_negative_button(phrase("btn_delete"), accept)
         builder.show()
 
     def _remove_domain(self, domain):
         domains = [d for d in self._whitelist_list() if d != domain]
         self._save_whitelist(domains)
-        self._toast(t("toast_removed", domain))
+        self._toast(phrase("toast_removed", domain))
 
     def _on_add_domain(self, *args):
         domain = normalize_domain(self.get_setting("whitelist_add", "") or "")
         if not domain:
-            self._toast(t("toast_bad_domain"))
+            self._toast(phrase("toast_bad_domain"))
             return
         domains = self._whitelist_list()
         if domain not in domains:
             domains.append(domain)
         self.set_setting("whitelist_add", "")
         self._save_whitelist(domains)
-        self._toast(t("toast_added", domain))
+        self._toast(phrase("toast_added", domain))
 
     def _save_whitelist(self, domains):
         if getattr(self, "_cache", None) is not None:
@@ -911,6 +1374,7 @@ class LinkGuardPlugin(BasePlugin):
             return 0
 
     def _count_once(self, url):
+        """openUrl вызывает сам себя через перегрузки — считаем метки один раз."""
         seen = getattr(self, "_counted", None)
         if seen is None:
             seen = self._counted = {}
@@ -937,7 +1401,69 @@ class LinkGuardPlugin(BasePlugin):
         self._stats = {"stats_cleaned": 0, "stats_warned": 0}
         self.set_setting("stats_cleaned", 0)
         self.set_setting("stats_warned", 0, reload_settings=True)
-        self._toast(t("stats_done"))
+        self._toast(phrase("stats_done"))
+
+    def _step(self, name, action):
+        try:
+            action()
+            self._debug("load: %s ok" % name)
+            return True
+        except Exception as e:
+            log("LinkGuard: load step %s failed: %s" % (name, e))
+            self._debug("load: %s упал — %s" % (name, e))
+            return False
+
+    def _rules_path(self):
+        folders = self._writable_dirs()
+        return os.path.join(folders[0], "link_guard_rules.json") if folders else None
+
+    def _load_rules(self):
+        """Списки с диска, затем при необходимости обновление из репозитория."""
+        if not self.get_setting("use_rules", True):
+            return
+        path = self._rules_path()
+        if path and os.path.exists(path):
+            try:
+                import json
+                with open(path, "r", encoding="utf-8") as handle:
+                    added = apply_rules(json.load(handle))
+                self._debug("rules: с диска, версия %s, добавлено %s" % (RULES_VERSION, added))
+            except Exception as e:
+                self._debug("rules: файл не прочитан: %s" % e)
+        try:
+            last = float(self.get_setting("rules_checked_at", 0) or 0)
+        except (TypeError, ValueError):
+            last = 0
+        if time.time() - last >= RULES_INTERVAL:
+            self._run_background(lambda: self._refresh_rules(manual=False))
+
+    def _refresh_rules(self, manual=False):
+        """Скачивает rules.json, объединяет со встроенными списками и сохраняет на диск."""
+        data = fetch_rules()
+        self.set_setting("rules_checked_at", time.time())
+        if not data:
+            if manual:
+                run_on_ui_thread(lambda: self._toast(phrase("rules_none")))
+            return
+        added = apply_rules(data)
+        self._debug("rules: из сети, версия %s, добавлено %s" % (RULES_VERSION, added))
+        path = self._rules_path()
+        if path:
+            try:
+                import json
+                with open(path, "w", encoding="utf-8") as handle:
+                    json.dump(data, handle, ensure_ascii=False)
+            except Exception as e:
+                self._debug("rules: не сохранились: %s" % e)
+        if getattr(self, "_cache", None) is not None:
+            self._cache.clear()
+        version = RULES_VERSION
+        if manual:
+            run_on_ui_thread(lambda: self._toast(phrase("rules_updated", version)))
+
+    def _on_refresh_rules_click(self, *args):
+        self._toast(phrase("toast_checking"))
+        self._run_background(lambda: self._refresh_rules(manual=True))
 
     def _maybe_check_updates(self):
         if not self.get_setting("check_updates", True):
@@ -979,21 +1505,21 @@ class LinkGuardPlugin(BasePlugin):
         self.set_setting("update_checked_at", time.time())
         if not info:
             if manual:
-                run_on_ui_thread(lambda: self._toast(t("toast_upd_failed")))
+                run_on_ui_thread(lambda: self._toast(phrase("toast_upd_failed")))
             return
 
         remote = str(info.get("version", ""))
         local, published = parse_version(__version__), parse_version(remote)
         if published <= local:
             if manual:
-                text = (t("upd_none", __version__) if published == local
-                        else t("upd_ahead", __version__, remote))
+                text = (phrase("upd_none", __version__) if published == local
+                        else phrase("upd_ahead", __version__, remote))
                 run_on_ui_thread(lambda: self._toast(text))
             return
 
         raw_log = info.get("changelog", "")
         if isinstance(raw_log, (list, tuple)):
-            raw_log = chr(10).join(str(i) for i in raw_log)
+            raw_log = LINE_BREAK.join(str(item) for item in raw_log)
         self.set_setting("update_version", remote)
         self.set_setting("update_changelog", str(raw_log))
         self.set_setting("update_url", str(info.get("url") or REPO_URL))
@@ -1008,7 +1534,7 @@ class LinkGuardPlugin(BasePlugin):
             items = [line.strip(" -•\t") for line in str(raw).splitlines() if line.strip()]
         if not items:
             return ""
-        return "%s\n%s" % (t("upd_whats_new"), "\n".join("• " + item for item in items))
+        return "%s\n%s" % (phrase("upd_whats_new"), "\n".join("• " + item for item in items))
 
     def _show_update(self, info, remote, attempt=0):
         link = str(info.get("url") or REPO_URL)
@@ -1017,15 +1543,15 @@ class LinkGuardPlugin(BasePlugin):
             if attempt < 5:
                 run_on_ui_thread(lambda: self._show_update(info, remote, attempt + 1), 3000)
             else:
-                self._toast(t("toast_upd_available", remote))
+                self._toast(phrase("toast_upd_available", remote))
             return
 
         builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
-        builder.set_title(t("upd_title", remote))
-        builder.set_message(t("upd_body", __version__, self._format_changelog(info), link))
+        builder.set_title(phrase("upd_title", remote))
+        builder.set_message(phrase("upd_body", __version__, self._format_changelog(info), link))
         builder.set_positive_button(
-            t("upd_install"), lambda d, w: (d.dismiss(), self._install_update(link, remote)))
-        builder.set_negative_button(t("btn_later"), lambda d, w: d.dismiss())
+            phrase("upd_install"), lambda d, w: (d.dismiss(), self._install_update(link, remote)))
+        builder.set_negative_button(phrase("btn_later"), lambda d, w: d.dismiss())
         builder.show()
 
     def _install_update(self, link, remote):
@@ -1039,7 +1565,7 @@ class LinkGuardPlugin(BasePlugin):
         try:
             builder = AlertDialogBuilder(get_last_fragment().getParentActivity(),
                                          AlertDialogBuilder.ALERT_TYPE_SPINNER)
-            builder.set_title(t("upd_downloading"))
+            builder.set_title(phrase("upd_downloading"))
             builder.set_cancelable(False)
             builder.show()
             self._progress = builder
@@ -1060,10 +1586,13 @@ class LinkGuardPlugin(BasePlugin):
             import requests
             resp = requests.get(link, timeout=30,
                                 headers={"User-Agent": "LinkGuard/%s" % __version__})
-            if resp.status_code == 200 and resp.content:
-                path, reason = self._store_plugin_file(resp.content, remote)
-            else:
+            if resp.status_code != 200:
                 reason = "HTTP %s" % resp.status_code
+            elif not self._looks_like_our_plugin(resp.content):
+                reason = "файл не похож на Link Guard"
+                self._debug("update: скачанное не похоже на плагин, установка отменена")
+            else:
+                path, reason = self._store_plugin_file(resp.content, remote)
         except Exception as e:
             reason = str(e)
             log("LinkGuard: download failed: %s" % e)
@@ -1094,6 +1623,15 @@ class LinkGuardPlugin(BasePlugin):
             pass
         return [f for f in dict.fromkeys(found) if f]
 
+    MAX_PLUGIN_SIZE = 2 * 1024 * 1024
+
+    def _looks_like_our_plugin(self, content):
+        """Не сохраняем и не ставим то, что не является этим же плагином."""
+        if not content or len(content) > self.MAX_PLUGIN_SIZE:
+            return False
+        head = content[:4096].decode("utf-8", "ignore")
+        return '__id__ = "link_guard"' in head and "__version__" in head
+
     def _store_plugin_file(self, content, remote):
         name = "link_guard_%s.plugin" % str(remote).replace(".", "_")
         problems = []
@@ -1117,18 +1655,16 @@ class LinkGuardPlugin(BasePlugin):
         self._hide_progress()
         if not path:
             copy_to_clipboard(link)
-            self._toast(t("upd_dl_why", (reason or "неизвестно")[:70]))
+            self._toast(phrase("upd_dl_why", (reason or "неизвестно")[:70]))
             return
         if self._launch_install(path):
-            self._toast(t("upd_ready"))
-            return
-        if self._send_to_saved(path, remote):
-            self._toast(t("upd_sent"))
+            self._toast(phrase("upd_ready"))
             return
         copy_to_clipboard(link)
-        self._toast(t("upd_dl_failed"))
+        self._toast(phrase("upd_dl_failed"))
 
     def _launch_install(self, path):
+        """Отдаём скачанный файл штатному установщику клиента."""
         if PluginsController is None:
             self._debug("update: PluginsController недоступен")
             return False
@@ -1147,18 +1683,8 @@ class LinkGuardPlugin(BasePlugin):
             log("LinkGuard: install dialog failed: %s" % e)
             return False
 
-    def _send_to_saved(self, path, remote):
-        if send_document is None or get_user_config is None:
-            return False
-        try:
-            send_document(get_user_config().getClientUserId(), path, "Link Guard %s" % remote)
-            return True
-        except Exception as e:
-            log("LinkGuard: send failed: %s" % e)
-            return False
-
     def _on_check_updates_click(self, *args):
-        self._toast(t("toast_checking"))
+        self._toast(phrase("toast_checking"))
         self._run_background(lambda: self._check_updates(manual=True))
 
     def _install_open_url_hook(self):
@@ -1189,22 +1715,136 @@ class LinkGuardPlugin(BasePlugin):
         if not self._hooks:
             log("LinkGuard: openUrl не найден, проверка при переходе отключена")
 
+    UPDATE_NAMES = ("TL_updateNewMessage", "TL_updateNewChannelMessage",
+                    "TL_updateShortMessage", "TL_updateShortChatMessage",
+                    "TL_updates", "TL_updatesCombined")
+
     def _install_update_hook(self):
-        try:
-            self.add_hook("NewMessage", match_substring=True)
-            log("LinkGuard: подписка на новые сообщения установлена")
-        except Exception as e:
-            log("LinkGuard: подписка на обновления недоступна: %s" % e)
+        registered = 0
+        for name in self.UPDATE_NAMES:
+            try:
+                self.add_hook(name)
+                registered += 1
+            except Exception as e:
+                log("LinkGuard: hook %s failed: %s" % (name, e))
+        self._debug("updates: подписок %d из %d" % (registered, len(self.UPDATE_NAMES)))
 
     def on_update_hook(self, update_name, account, update):
+        self._debug("update: %s" % update_name)
+        self._consume_update(update)
+        return HookResult()
+
+    def on_updates_hook(self, container_name, account, updates):
         try:
-            message = getattr(update, "message", None)
-            if message is not None:
-                self._index_anchors(getattr(message, "message", None),
-                                    getattr(message, "entities", None))
+            items = getattr(updates, "updates", None)
+            if items is None:
+                self._consume_update(updates)
+                return HookResult()
+            total = items.size()
+            names = []
+            for i in range(total):
+                item = items.get(i)
+                if len(names) < 6:
+                    names.append(type(item).__name__)
+                self._consume_update(item)
+            self._debug("updates: %s, внутри %d: %s"
+                        % (container_name, total, ", ".join(names) or "пусто"))
+        except Exception as e:
+            self._debug("updates: разбор не удался — %s" % e)
+        return HookResult()
+
+    def _consume_update(self, update):
+        try:
+            payload = getattr(update, "message", None)
+            if isinstance(payload, str):
+                self._index_anchors(payload, getattr(update, "entities", None))
+                self._index_source(update, payload)
+            elif payload is not None:
+                text = getattr(payload, "message", None)
+                self._index_anchors(text, getattr(payload, "entities", None))
+                self._index_source(payload, text)
+        except Exception as e:
+            self._debug("update: разбор не удался — %s" % e)
+
+    @staticmethod
+    def _message_source(message):
+        """Тот же вопрос, но по объекту сообщения из входящего обновления."""
+        try:
+            if getattr(message, "out", False):
+                return "trusted"
+            peer = getattr(message, "peer_id", None)
+            if peer is not None and int(getattr(peer, "channel_id", 0) or 0):
+                return "unknown"
+            from_id = getattr(message, "from_id", None)
+            user_id = int(getattr(message, "user_id", 0) or 0)
+            for holder in (from_id, peer):
+                if user_id:
+                    break
+                if holder is None:
+                    continue
+                user_id = int(getattr(holder, "user_id", 0) or 0)
+                if user_id:
+                    break
+            if not user_id:
+                return "unknown"
+            if get_messages_controller is None:
+                return None
+            user = get_messages_controller().getUser(user_id)
+            if user is None:
+                return None
+            return "trusted" if getattr(user, "contact", False) else "unknown"
+        except Exception:
+            return None
+
+    def _fragment_source(self):
+        """Откуда ссылка: открытый канал и незнакомец — чужие, контакт и своё — доверенные."""
+        fragment = get_last_fragment()
+        if fragment is None:
+            return None
+        try:
+            if fragment.getCurrentChat() is not None:
+                return "unknown"
         except Exception:
             pass
-        return HookResult()
+        try:
+            user = fragment.getCurrentUser()
+        except Exception:
+            return None
+        if user is None:
+            return None
+        try:
+            if getattr(user, "self", False) or getattr(user, "contact", False):
+                return "trusted"
+            return "unknown"
+        except Exception:
+            return None
+
+    def _index_source(self, message, text):
+        source = self._message_source(message)
+        if not source:
+            return
+        holder = getattr(self, "_sources", None)
+        if holder is None:
+            return
+        found = list(URL_RE.findall(str(text or "")))
+        found.extend(self._anchor_urls(message))
+        for url in found:
+            if len(holder) >= ANCHOR_MAX:
+                holder.clear()
+            holder[url] = source
+
+    @staticmethod
+    def _anchor_urls(message):
+        urls = []
+        try:
+            entities = getattr(message, "entities", None)
+            for i in range(entities.size()):
+                url = getattr(entities.get(i), "url", None)
+                if url:
+                    urls.append(str(url))
+        except Exception:
+            pass
+        return urls
 
     def _index_anchors(self, text, entities):
         if not text or entities is None:
@@ -1222,7 +1862,7 @@ class LinkGuardPlugin(BasePlugin):
                     continue
                 offset = int(getattr(entity, "offset", 0) or 0)
                 length = int(getattr(entity, "length", 0) or 0)
-                shown = text[offset:offset + length] if length else ""
+                shown = slice_utf16(text, offset, length)
                 if shown:
                     self._remember_anchor(str(url), shown)
             except Exception:
@@ -1237,6 +1877,7 @@ class LinkGuardPlugin(BasePlugin):
         anchors[url] = shown
 
     def _cached_analyze(self, url, anchor=None):
+        """Разбор с кэшем на несколько минут: одна ссылка в чате не считается заново."""
         aggressive = self._aggressive()
         whitelist = self._whitelist()
         signature = (aggressive, tuple(sorted(whitelist)), anchor or "", LANG)
@@ -1269,6 +1910,7 @@ class LinkGuardPlugin(BasePlugin):
         return None, None
 
     def _is_approved(self, url):
+        """Одобренную ссылку пропускаем окном в секунды: хук срабатывает повторно."""
         now = time.monotonic()
         stamps = getattr(self, "_bypass", None)
         if not stamps:
@@ -1279,6 +1921,7 @@ class LinkGuardPlugin(BasePlugin):
         return url in stamps
 
     def on_open_url(self, param):
+        """Точка входа: клиент собирается открыть адрес, решаем что с ним делать."""
         if not self.get_setting("check_enabled", True):
             return
 
@@ -1290,20 +1933,31 @@ class LinkGuardPlugin(BasePlugin):
             return
 
         verdict = self._cached_analyze(url, self._anchors.get(url))
+        verdict.source = self._sources.get(url) or self._fragment_source()
         try:
             mode = int(self.get_setting("show_mode", 0) or 0)
         except (TypeError, ValueError):
             mode = 0
         expand_short = bool(self.get_setting("expand_short", True))
         clean_on_open = bool(self.get_setting("clean_on_open", True))
+        ask_age = bool(self.get_setting("check_age", False))
 
-        worth_showing = mode >= 1 or bool(verdict.flags)
+        if mode >= 1:
+            worth_showing = True
+        elif verdict.source == "trusted":
+            worth_showing = verdict.suspicious
+        else:
+            worth_showing = bool(verdict.flags)
 
-        needs_dialog = (worth_showing
-                        or (verdict.is_shortener and expand_short)) and self._can_dialog()
+        wants_age = (ask_age and bool(verdict.flags)
+                     and DOMAIN_RE.fullmatch(registrable(verdict.host or "")) is not None)
+        needs_dialog = (worth_showing or (verdict.is_shortener and expand_short)
+                        or wants_age) and self._can_dialog()
 
-        self._debug("open %s risk=%s dialog=%s arg=%s"
-                    % (url, verdict.risk, needs_dialog, type(param.args[index]).__name__))
+        self._debug("open %s risk=%s source=%s age=%s dialog=%s arg=%s"
+                    % (url, verdict.risk, verdict.source,
+                       "да" if wants_age else ("выкл" if not ask_age else "нет"),
+                       needs_dialog, type(param.args[index]).__name__))
 
         if not needs_dialog:
             if clean_on_open and verdict.cleaned != url:
@@ -1312,7 +1966,7 @@ class LinkGuardPlugin(BasePlugin):
                     self._bump("stats_cleaned", removed)
                     self._debug("cleaned -> %s" % verdict.cleaned)
                     if removed:
-                        run_on_ui_thread(lambda: self._toast(t("toast_cleaned", removed)))
+                        run_on_ui_thread(lambda: self._toast(phrase("toast_cleaned", removed)))
                 else:
                     self._debug("не удалось подставить очищенный адрес")
             return
@@ -1321,55 +1975,95 @@ class LinkGuardPlugin(BasePlugin):
         method = param.method
         args = list(param.args)
 
-        if verdict.is_shortener and expand_short:
-            self._expand_then_show(verdict, method, args, index)
+        unfold = verdict.is_shortener and expand_short
+        if unfold or wants_age:
+            self._enrich_then_show(verdict, method, args, index, unfold, wants_age)
         else:
             self._show_verdict(verdict, method, args, index)
 
-    def _expand_then_show(self, verdict, method, args, index):
+    def _enrich_then_show(self, verdict, method, args, index, unfold, wants_age):
         def worker():
-            try:
-                final, hops = expand(verdict.cleaned)
-                if final:
-                    verdict.final = final
-                    inner = analyze(final, self._aggressive(), self._whitelist())
-                    for level, text in inner.flags:
-                        verdict.add(level, text)
-                    if hops:
-                        verdict.add(INFO, t("f_hops", hops))
-            except Exception as e:
-                log("LinkGuard: expand worker failed: %s" % e)
+            if unfold:
+                try:
+                    final, hops = expand(verdict.cleaned)
+                    if final:
+                        verdict.final = final
+                        inner = analyze(final, self._aggressive(), self._whitelist())
+                        for level, text in inner.flags:
+                            verdict.add(level, text)
+                        if hops:
+                            verdict.add(INFO, phrase("f_hops", hops))
+                except Exception as e:
+                    log("LinkGuard: expand worker failed: %s" % e)
+            if wants_age:
+                try:
+                    target = verdict.final or verdict.cleaned
+                    host = (urlsplit(target).hostname or verdict.host or "").lower()
+                    add_age_flag(verdict, self._domain_age(registrable(host)))
+                except Exception as e:
+                    log("LinkGuard: age worker failed: %s" % e)
             run_on_ui_thread(lambda: self._finish_expanded(verdict, method, args, index))
 
         self._run_background(worker)
+
+    def _domain_age(self, domain):
+        """Возраст домена с недельным кэшем; у IP и не-доменов не спрашиваем."""
+        if not domain:
+            return None
+        cache = getattr(self, "_ages", None)
+        if cache is None:
+            cache = self._ages = {}
+        now = time.time()
+        hit = cache.get(domain)
+        if hit and now - hit[0] < AGE_CACHE_TTL:
+            return hit[1]
+        if not DOMAIN_RE.fullmatch(domain or ""):
+            self._debug("rdap: %s — не доменное имя, пропускаю" % domain)
+            return None
+        self._debug("rdap: спрашиваю %s" % domain)
+        days = domain_age_days(domain)
+        if days is None or days < 0:
+            self._debug("rdap: %s — ответа нет" % domain)
+            return None
+        if len(cache) >= AGE_CACHE_MAX:
+            cache.clear()
+        cache[domain] = (now, days)
+        self._debug("rdap: %s -> %s дней" % (domain, days))
+        return days
 
     def _finish_expanded(self, verdict, method, args, index):
         if self._can_dialog():
             self._show_verdict(verdict, method, args, index)
             return
         if verdict.risk == HIGH:
-            self._toast(t("toast_blocked"))
+            self._toast(phrase("toast_blocked"))
             return
         self._reopen(method, args, index, verdict.final or verdict.cleaned)
 
     @staticmethod
     def _title(verdict):
         if verdict.risk == HIGH:
-            return t("title_danger")
+            return phrase("title_danger")
         if verdict.risk == MEDIUM:
-            return t("title_suspicious")
-        return t("title_info")
+            return phrase("title_suspicious")
+        return phrase("title_info")
 
     def _describe(self, verdict):
         lines = []
         shown = verdict.display_host or verdict.host
         if shown:
-            lines.append(t("lbl_domain", shown))
+            lines.append(phrase("lbl_domain", shown))
         if verdict.final and verdict.final != verdict.cleaned:
-            lines.append(t("lbl_leads", verdict.final))
+            lines.append(phrase("lbl_leads", verdict.final))
         if verdict.removed_params:
-            lines.append(t("lbl_removed", len(verdict.removed_params),
+            lines.append(phrase("lbl_removed", len(verdict.removed_params),
                            ", ".join(verdict.removed_params[:4])))
+        if verdict.age_days is not None:
+            lines.append(phrase("lbl_age", human_age(verdict.age_days)))
+        if verdict.source == "unknown":
+            lines.append(phrase("src_stranger"))
+        elif verdict.source == "trusted":
+            lines.append(phrase("src_trusted"))
 
         marks = {HIGH: "⛔", MEDIUM: "⚠️", LOW: "•", INFO: "•"}
         problems = sorted(verdict.flags, key=lambda f: -_RISK_ORDER[f[0]])
@@ -1401,7 +2095,6 @@ class LinkGuardPlugin(BasePlugin):
             verdict.cleaned if self.get_setting("clean_on_open", True) else verdict.original)
 
         self._bump("stats_warned")
-        self._bump("stats_cleaned", len(verdict.removed_params))
 
         builder = AlertDialogBuilder(activity)
         builder.set_title(self._title(verdict))
@@ -1409,6 +2102,9 @@ class LinkGuardPlugin(BasePlugin):
 
         def do_open(dialog, which):
             dialog.dismiss()
+            removed = len(verdict.removed_params)
+            if removed and self._count_once(verdict.original):
+                self._bump("stats_cleaned", removed)
             self._reopen(method, args, index, target)
 
         def do_trust(dialog, which):
@@ -1416,13 +2112,13 @@ class LinkGuardPlugin(BasePlugin):
             self._confirm_trust(verdict, method, args, index, target)
 
         if verdict.risk == HIGH:
-            builder.set_positive_button(t("btn_cancel"), lambda d, w: d.dismiss())
-            builder.set_negative_button(t("btn_open"), do_open)
+            builder.set_positive_button(phrase("btn_cancel"), lambda d, w: d.dismiss())
+            builder.set_negative_button(phrase("btn_open"), do_open)
         else:
-            builder.set_positive_button(t("btn_open"), do_open)
-            builder.set_negative_button(t("btn_cancel"), lambda d, w: d.dismiss())
+            builder.set_positive_button(phrase("btn_open"), do_open)
+            builder.set_negative_button(phrase("btn_cancel"), lambda d, w: d.dismiss())
             if verdict.host:
-                builder.set_neutral_button(t("btn_trust"), do_trust)
+                builder.set_neutral_button(phrase("btn_trust"), do_trust)
         builder.show()
 
     def _confirm_trust(self, verdict, method, args, index, target):
@@ -1436,10 +2132,10 @@ class LinkGuardPlugin(BasePlugin):
             self._reopen(method, args, index, target)
 
         builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
-        builder.set_title(t("trust_title"))
-        builder.set_message(t("trust_body", domain))
-        builder.set_positive_button(t("btn_cancel"), lambda d, w: d.dismiss())
-        builder.set_negative_button(t("btn_trust_yes"), accept)
+        builder.set_title(phrase("trust_title"))
+        builder.set_message(phrase("trust_body", domain))
+        builder.set_positive_button(phrase("btn_cancel"), lambda d, w: d.dismiss())
+        builder.set_negative_button(phrase("btn_trust_yes"), accept)
         builder.show()
 
     def _trust_domain(self, domain):
@@ -1449,7 +2145,7 @@ class LinkGuardPlugin(BasePlugin):
         if domain not in domains:
             domains.append(domain)
         self._save_whitelist(domains)
-        self._toast(t("toast_trusted", domain))
+        self._toast(phrase("toast_trusted", domain))
 
     def _debug(self, message):
         if self.get_setting("debug_log", False):
@@ -1462,18 +2158,19 @@ class LinkGuardPlugin(BasePlugin):
         builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
         builder.set_title(title)
         builder.set_message(body)
-        builder.set_positive_button(t("btn_ok"), lambda d, w: d.dismiss())
+        builder.set_positive_button(phrase("btn_ok"), lambda d, w: d.dismiss())
         builder.show()
 
     def _on_tags_note(self, *args):
-        self._show_note(t("tags_title"), t("tags_note"))
+        self._show_note(phrase("tags_title"), phrase("tags_note"))
 
     def _on_privacy_note(self, *args):
-        self._show_note(t("privacy_title"), t("privacy_note"))
+        self._show_note(phrase("privacy_title"), phrase("privacy_note"))
 
 
     @staticmethod
     def _replace_url_arg(args, index, url):
+        """Клиент передаёт адрес строкой или объектом Uri — подменяем оба вида."""
         if index is None or not args:
             return False
         current = args[index]
@@ -1563,7 +2260,7 @@ class LinkGuardPlugin(BasePlugin):
         if original:
             self._bypass.pop(original, None)
         copy_to_clipboard(url)
-        self._toast(t("toast_copied"))
+        self._toast(phrase("toast_copied"))
 
     def on_send_message_hook(self, account, params):
         if not self.get_setting("clean_outgoing", False):
@@ -1635,21 +2332,21 @@ class LinkGuardPlugin(BasePlugin):
             return
         urls = self._collect_urls(message)
         if not urls:
-            self._toast(t("toast_no_links"))
+            self._toast(phrase("toast_no_links"))
             return
         if not self._can_dialog():
-            self._toast(t("toast_no_dialog"))
+            self._toast(phrase("toast_no_dialog"))
             return
 
         verdicts = [self._cached_analyze(u, self._anchors.get(u)) for u in urls[:5]]
         marks = {HIGH: "⛔", MEDIUM: "⚠️", LOW: "•", INFO: "✓"}
-        blocks = ["%s %s\n%s" % (marks[v.risk], v.display_host or v.host or "?",
+        blocks = ["%s %s\n%s" % (marks[v.risk], verdict.display_host or verdict.host or "?",
                                  self._describe(v)) for v in verdicts]
 
         builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
-        builder.set_title(t("checked_n", len(verdicts)))
+        builder.set_title(phrase("checked_n", len(verdicts)))
         builder.set_message("\n\n".join(blocks))
-        builder.set_positive_button(t("btn_ok"), lambda d, w: d.dismiss())
+        builder.set_positive_button(phrase("btn_ok"), lambda d, w: d.dismiss())
         builder.show()
 
     def on_menu_copy(self, context):
@@ -1658,7 +2355,7 @@ class LinkGuardPlugin(BasePlugin):
             return
         urls = self._collect_urls(message)
         if not urls:
-            self._toast(t("toast_no_links"))
+            self._toast(phrase("toast_no_links"))
             return
         aggressive = self._aggressive()
         cleaned = []
