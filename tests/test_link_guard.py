@@ -681,19 +681,24 @@ check("открывается штатный диалог установки к�
       installs == [("/tmp/plugins/link_guard_9_9_9.plugin", True)], installs)
 check("файл в «Избранное» при этом не шлём", not SENT_DOCUMENTS, SENT_DOCUMENTS)
 
-lg.PluginsController = None
-plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin", "",
-                        "https://example.com/x.plugin", "9.9.9")
-check("без установщика остаётся отправка файла", len(SENT_DOCUMENTS) == 1, SENT_DOCUMENTS)
-
-real_send = lg.send_document
-lg.send_document = None
 copied = []
 real_clip = lg.copy_to_clipboard
 lg.copy_to_clipboard = lambda text: copied.append(text)
+
+lg.PluginsController = None
+plugin._finish_download("/tmp/plugins/link_guard_9_9_9.plugin", "",
+                        "https://example.com/x.plugin", "9.9.9")
+check("без установщика ничего не шлём в чат", not SENT_DOCUMENTS, SENT_DOCUMENTS)
+check("вместо этого копируем ссылку", copied == ["https://example.com/x.plugin"], copied)
+
+copied.clear()
 plugin._finish_download(None, "нет доступной папки", "https://example.com/x.plugin", "9.9.9")
 check("если файл не скачался — ссылка в буфер", copied == ["https://example.com/x.plugin"], copied)
-lg.send_document, lg.copy_to_clipboard = real_send, real_clip
+lg.copy_to_clipboard = real_clip
+
+check("в коде не осталось отправки в чат",
+      not hasattr(lg, "send_document") and not hasattr(lg, "send_text"),
+      [n for n in ("send_document", "send_text") if hasattr(lg, n)])
 
 print("\nЧистка исходящих")
 plugin.set_setting("clean_outgoing", True)
