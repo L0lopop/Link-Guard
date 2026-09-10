@@ -1390,23 +1390,51 @@ class LinkGuardPlugin(BasePlugin):
         if not self._hooks:
             log("LinkGuard: openUrl не найден, проверка при переходе отключена")
 
+    UPDATE_NAMES = ("TL_updateNewMessage", "TL_updateNewChannelMessage",
+                    "TL_updateShortMessage", "TL_updateShortChatMessage",
+                    "TL_updates", "TL_updatesCombined")
+
     def _install_update_hook(self):
-        try:
-            self.add_hook("NewMessage", match_substring=True)
-            log("LinkGuard: подписка на новые сообщения установлена")
-        except Exception as e:
-            log("LinkGuard: подписка на обновления недоступна: %s" % e)
+        registered = 0
+        for name in self.UPDATE_NAMES:
+            try:
+                self.add_hook(name)
+                registered += 1
+            except Exception as e:
+                log("LinkGuard: hook %s failed: %s" % (name, e))
+        self._debug("updates: подписок %d из %d" % (registered, len(self.UPDATE_NAMES)))
 
     def on_update_hook(self, update_name, account, update):
-        try:
-            message = getattr(update, "message", None)
-            if message is not None:
-                text = getattr(message, "message", None)
-                self._index_anchors(text, getattr(message, "entities", None))
-                self._index_source(message, text)
-        except Exception:
-            pass
+        self._debug("update: %s" % update_name)
+        self._consume_update(update)
         return HookResult()
+
+    def on_updates_hook(self, container_name, account, updates):
+        try:
+            items = getattr(updates, "updates", None)
+            if items is None:
+                self._consume_update(updates)
+                return HookResult()
+            total = items.size()
+            self._debug("updates: %s, внутри %d" % (container_name, total))
+            for i in range(total):
+                self._consume_update(items.get(i))
+        except Exception as e:
+            self._debug("updates: разбор не удался — %s" % e)
+        return HookResult()
+
+    def _consume_update(self, update):
+        try:
+            payload = getattr(update, "message", None)
+            if isinstance(payload, str):
+                self._index_anchors(payload, getattr(update, "entities", None))
+                self._index_source(update, payload)
+            elif payload is not None:
+                text = getattr(payload, "message", None)
+                self._index_anchors(text, getattr(payload, "entities", None))
+                self._index_source(payload, text)
+        except Exception as e:
+            self._debug("update: разбор не удался — %s" % e)
 
     @staticmethod
     def _message_source(message):
@@ -1417,8 +1445,10 @@ class LinkGuardPlugin(BasePlugin):
             if peer is not None and int(getattr(peer, "channel_id", 0) or 0):
                 return "unknown"
             from_id = getattr(message, "from_id", None)
-            user_id = 0
+            user_id = int(getattr(message, "user_id", 0) or 0)
             for holder in (from_id, peer):
+                if user_id:
+                    break
                 if holder is None:
                     continue
                 user_id = int(getattr(holder, "user_id", 0) or 0)
@@ -1567,9 +1597,10 @@ class LinkGuardPlugin(BasePlugin):
         needs_dialog = (worth_showing or (verdict.is_shortener and expand_short)
                         or wants_age) and self._can_dialog()
 
-        self._debug("open %s risk=%s source=%s dialog=%s arg=%s"
-                    % (url, verdict.risk, verdict.source, needs_dialog,
-                       type(param.args[index]).__name__))
+        self._debug("open %s risk=%s source=%s age=%s dialog=%s arg=%s"
+                    % (url, verdict.risk, verdict.source,
+                       "да" if wants_age else ("выкл" if not ask_age else "нет"),
+                       needs_dialog, type(param.args[index]).__name__))
 
         if not needs_dialog:
             if clean_on_open and verdict.cleaned != url:
@@ -1628,12 +1659,15 @@ class LinkGuardPlugin(BasePlugin):
         hit = cache.get(domain)
         if hit and now - hit[0] < AGE_CACHE_TTL:
             return hit[1]
+        self._debug("rdap: спрашиваю %s" % domain)
         days = domain_age_days(domain)
-        if days is not None:
-            if len(cache) >= AGE_CACHE_MAX:
-                cache.clear()
-            cache[domain] = (now, days)
-            self._debug("rdap: %s -> %s дней" % (domain, days))
+        if days is None:
+            self._debug("rdap: %s — ответа нет" % domain)
+            return None
+        if len(cache) >= AGE_CACHE_MAX:
+            cache.clear()
+        cache[domain] = (now, days)
+        self._debug("rdap: %s -> %s дней" % (domain, days))
         return days
 
     def _finish_expanded(self, verdict, method, args, index):

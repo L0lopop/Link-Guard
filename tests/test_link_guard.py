@@ -183,10 +183,14 @@ def install_stubs():
     _stub("client_utils", get_last_fragment=lambda: fragment,
           run_on_queue=lambda fn, *a, **kw: fn(),
           send_document=lambda peer, path, caption=None: sent_documents.append((peer, path)),
-          get_user_config=lambda *a: types.SimpleNamespace(getClientUserId=lambda: 42))
-    _stub("file_utils", get_plugins_dir=lambda: "/tmp/plugins",
-          get_cache_dir=lambda: "/tmp/cache",
-          get_documents_dir=lambda: "/tmp/docs",
+          get_user_config=lambda *a: types.SimpleNamespace(getClientUserId=lambda: 42),
+          get_messages_controller=lambda *a: types.SimpleNamespace(
+              getUser=lambda uid: types.SimpleNamespace(contact=(int(uid) == 777))))
+    import tempfile
+    sandbox = tempfile.mkdtemp(prefix="link_guard_tests_")
+    _stub("file_utils", get_plugins_dir=lambda: sandbox,
+          get_cache_dir=lambda: sandbox,
+          get_documents_dir=lambda: sandbox,
           ensure_dir_exists=lambda path: None,
           write_file_bytes=lambda path, data: None)
     _stub("android_utils", log=lambda *a: None, run_on_ui_thread=lambda f, d=0: f(),
@@ -232,6 +236,7 @@ def load_plugin(minimal=False):
 
 
 lg = load_plugin()
+lg.fetch_rules = lambda timeout=10: None
 
 failures = []
 
@@ -400,8 +405,12 @@ check("поддомен того же сайта не тревожит", not v.s
 v = lg.analyze("https://example.com/a", anchor="нажми сюда")
 check("текстовая подпись не тревожит", not v.suspicious, v.flags)
 
-check("подписка на сообщения запрошена",
-      any("NewMessage" in n for n in plugin.update_hooks), plugin.update_hooks)
+check("подписка идёт по точным именам TL",
+      "TL_updateNewMessage" in plugin.update_hooks
+      and "TL_updates" in plugin.update_hooks, plugin.update_hooks)
+check("подписаны и контейнеры, и короткие апдейты",
+      "TL_updatesCombined" in plugin.update_hooks
+      and "TL_updateShortMessage" in plugin.update_hooks, plugin.update_hooks)
 
 
 class FakeEntity:
@@ -426,7 +435,7 @@ update = types.SimpleNamespace(message=types.SimpleNamespace(
     entities=FakeEntities([FakeEntity(text.index("sberbank.ru"), len("sberbank.ru"),
                                       "https://pay-now.top/enter")]),
 ))
-plugin.on_update_hook("updateNewMessage", 0, update)
+plugin.on_update_hook("TL_updateNewMessage", 0, update)
 check("подпись из сообщения запомнена",
       plugin._anchors.get("https://pay-now.top/enter") == "sberbank.ru", plugin._anchors)
 
@@ -741,6 +750,52 @@ plugin._check_updates(manual=True)
 check("недоступный репозиторий не роняет плагин", True)
 lg.fetch_update_info = real_fetch
 
+print("\nОбновления в контейнере")
+
+
+class FakeList:
+
+    def __init__(self, items):
+        self.items = items
+
+    def size(self):
+        return len(self.items)
+
+    def get(self, i):
+        return self.items[i]
+
+
+plugin._anchors.clear()
+plugin._sources.clear()
+inner_text = "смотри sberbank.ru внутри контейнера"
+inner = types.SimpleNamespace(message=types.SimpleNamespace(
+    out=False,
+    peer_id=types.SimpleNamespace(channel_id=77),
+    from_id=None,
+    message=inner_text,
+    entities=FakeEntities([FakeEntity(inner_text.index("sberbank.ru"), len("sberbank.ru"),
+                                      "https://sber-oplata.buzz/pay")]),
+))
+plugin.on_updates_hook("TL_updates", 0, types.SimpleNamespace(updates=FakeList([inner])))
+check("ссылка из контейнера разобрана",
+      plugin._anchors.get("https://sber-oplata.buzz/pay") == "sberbank.ru", plugin._anchors)
+check("источник из контейнера определён",
+      plugin._sources.get("https://sber-oplata.buzz/pay") == "unknown", plugin._sources)
+
+short = types.SimpleNamespace(out=False, user_id=12345,
+                              message="короткое https://korotkoe.example/x", entities=None)
+plugin._consume_update(short)
+check("короткий апдейт с текстом строкой тоже разбирается",
+      plugin._sources.get("https://korotkoe.example/x") == "unknown", plugin._sources)
+
+contact_msg = types.SimpleNamespace(out=False, user_id=777, peer_id=None, from_id=None,
+                                    message="от друга https://drug.example/y", entities=None)
+plugin._consume_update(contact_msg)
+check("ссылка от контакта помечена доверенной",
+      plugin._sources.get("https://drug.example/y") == "trusted", plugin._sources)
+plugin._anchors.clear()
+plugin._sources.clear()
+
 print("\nПравила из репозитория")
 check("мусор в списки не попадает",
       lg.sanitize_rules_list(["ok.example", 42, "", "с пробелом", "x" * 200]) == ["ok.example"],
@@ -751,7 +806,7 @@ before_brands = len(lg.BRANDS)
 added = lg.apply_rules({"version": 7, "brands": ["novyibank.ru"],
                         "trackers": ["newclid"], "bait": ["razblokirovka"],
                         "tracker_prefixes": ["zz_"], "risky_tld": ["bogus"]})
-check("правила добавили записи", added >= 5, added)
+check("правила добавили записи", added == 5, added)
 check("версия правил запомнена", lg.RULES_VERSION == 7, lg.RULES_VERSION)
 check("встроенные бренды не потерялись", len(lg.BRANDS) == before_brands + 1)
 check("новый бренд участвует в проверке",
@@ -764,6 +819,15 @@ check("новый префикс вырезается",
       lg.clean_url("https://shop.ru/x?zz_source=a")[0] == "https://shop.ru/x")
 
 check("битые правила ничего не ломают", lg.apply_rules("не словарь") == 0)
+
+lg.fetch_rules = lambda timeout=10: {"version": 9, "brands": ["setevoi-bank.ru"]}
+plugin.set_setting("rules_checked_at", 0)
+plugin._refresh_rules(manual=True)
+check("правила из сети применяются", "setevoi-bank.ru" in lg.BRANDS)
+check("версия из сети запомнена", lg.RULES_VERSION == 9, lg.RULES_VERSION)
+check("файл правил сохранён на диск",
+      os.path.exists(plugin._rules_path()), plugin._rules_path())
+lg.fetch_rules = lambda timeout=10: None
 check("после мусора списки целы", "novyibank.ru" in lg.BRANDS)
 
 import json as _json
