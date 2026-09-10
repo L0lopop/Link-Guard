@@ -153,11 +153,14 @@ def main():
 
     print("== чтение файла ==")
     full = Database(open(full_path, "rb").read())
-    check(set(full.sections) == {"MALW", "WHIT", "BRND", "TLDR", "PLAT"},
-          "все пять разделов на месте")
+    check(set(full.sections) == {"MALW", "WHIT", "BRND", "TLDR", "PLAT", "SUFX"},
+          "все шесть разделов на месте")
     check(full.built_day > 20000, "дата сборки записана")
     check(len(full.brands) == 1000, "тысяча брендов на месте")
     check(len(full.platforms) > 1000, "платформы общего хостинга собраны")
+    suffixes = full._lines("SUFX")
+    check("com.hk" in suffixes and "co.uk" in suffixes,
+          "зоны второго уровня на месте (%d)" % len(suffixes))
     print("  разделы: %s" % ", ".join(sorted(full.sections)))
     print("  платформ: %d, брендов: %d" % (len(full.platforms), len(full.brands)))
 

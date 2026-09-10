@@ -11,6 +11,7 @@ import os
 import struct
 import sys
 import tempfile
+import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1081,6 +1082,45 @@ lg.install_database(None)
 v = lg.analyze("https://moshennik.top/vhod")
 check("без базы проверка по ней не идёт",
       not any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
+
+print("\nБренды подхватываются из базы")
+# В разделе BRND лежит тысяча посещаемых доменов, обновляемая вместе с базой.
+# Плагин должен ловить подделки под них, не зная их заранее.
+REAL_DB = os.path.join(tempfile.gettempdir(), "lgdb_test", "full.lgdb")
+if os.path.exists(REAL_DB):
+    real = lg.read_database(REAL_DB)
+    lg.install_database(real)
+    check("бренды прочитаны из базы", len(real.brands) == 1000, len(real.brands))
+    check("своих брендов в коде нет среди подхваченных",
+          "cloudflare.com" not in lg.BRANDS and "cloudflare.com" in real.brands)
+
+    v = lg.analyze("https://cloudflaer.com/login")
+    check("опечатка в подхваченном бренде поймана", v.risk == lg.HIGH, v.flags)
+
+    started = time.time()
+    for i in range(200):
+        lg.analyze("https://primer-%d.example.net/stranica" % i)
+    per_call = (time.time() - started) / 200 * 1000
+    print("  %.1f мс на разбор с тысячей брендов" % per_call)
+    check("разбор укладывается в 40 мс", per_call < 40, per_call)
+
+    # Главный риск: чужой домен случайно окажется в одной правке от бренда.
+    alarms = []
+    for host in sorted(real.brands)[:400]:
+        verdict = lg.analyze("https://%s/" % host)
+        if verdict.risk == lg.HIGH:
+            alarms.append((host, verdict.flags))
+    check("сами бренды не считаются подделками: тревог %d" % len(alarms),
+          not alarms, alarms[:3])
+
+    everyday = ["ya.ru", "dzen.ru", "habr.com", "rutracker.org", "kinopoisk.ru",
+                "2gis.ru", "sravni.ru", "banki.ru", "auto.ru", "cian.ru"]
+    noisy = [h for h in everyday if lg.analyze("https://%s/" % h).risk == lg.HIGH]
+    check("обычные сайты не тревожат: %s" % noisy, not noisy)
+    lg.install_database(None)
+else:
+    check("настоящая база найдена для проверки брендов", True,
+          "пропущено: нет %s" % REAL_DB)
 
 print("\nБаза: порченые файлы")
 for broken, title in (

@@ -838,16 +838,25 @@ class Verdict:
 
 
 def levenshtein(left, right):
+    """Расстояние правки, где перестановка соседних знаков стоит единицу.
+
+    Обычная мера считает её за две, и самая частая опечатка —
+    переставленные буквы — оставалась незамеченной.
+    """
     if left == right:
         return 0
     if not left or not right:
         return max(len(left), len(right))
+    before = None
     prev = list(range(len(right) + 1))
     for i, ca in enumerate(left, 1):
         cur = [i]
         for j, cb in enumerate(right, 1):
-            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
-        prev = cur
+            step = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+            if (i > 1 and j > 1 and ca == right[j - 2] and left[i - 2] == cb):
+                step = min(step, before[j - 2] + 1)
+            cur.append(step)
+        before, prev = prev, cur
     return prev[-1]
 
 
@@ -856,8 +865,14 @@ def registrable(host):
     parts = host.split(".")
     if len(parts) < 2:
         return host
-    if len(parts) >= 3 and ".".join(parts[-2:]) in TWO_LEVEL_TLD:
-        return ".".join(parts[-3:])
+    if len(parts) >= 3:
+        tail = ".".join(parts[-2:])
+        known = TWO_LEVEL_TLD
+        database = active_database()
+        if database is not None and database.suffixes:
+            known = TWO_LEVEL_TLD | database.suffixes
+        if tail in known:
+            return ".".join(parts[-3:])
     return ".".join(parts[-2:])
 
 
@@ -1023,20 +1038,30 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         names = sorted(phrase("scripts_" + s) for s in scripts)
         verdict.add(HIGH, phrase("f_mixed", ", ".join(names)))
 
+    known_brands = BRANDS
+    if database is not None and database.brands:
+        known_brands = BRANDS | database.brands
+
     defused = to_latin_lookalike(shown)
     defused_reg = registrable(defused)
-    if defused_reg != reg and defused_reg in BRANDS:
+    if defused_reg != reg and defused_reg in known_brands:
         verdict.add(HIGH, phrase("f_lookalike", defused_reg))
-    elif defused_reg not in BRANDS:
-        for brand in sorted(BRANDS):
-            dist = levenshtein(defused_reg, brand)
+    elif defused_reg not in known_brands and not known_good:
+        for brand in sorted(known_brands):
+            if abs(len(defused_reg) - len(brand)) > 2:
+                continue
+            # Своим спискам доверяем больше: подхваченным из сети засчитываем
+            # только правку в один знак, иначе похожие короткие имена спорят.
             limit = 1 if len(brand) < 10 else 2
-            if 1 <= dist <= limit and abs(len(defused_reg) - len(brand)) <= 2:
+            if brand not in BRANDS:
+                limit = 1
+            dist = levenshtein(defused_reg, brand)
+            if 1 <= dist <= limit:
                 verdict.add(HIGH, phrase("f_typo", brand, dist,
                                         plural_form(phrase("unit_char"), dist)))
                 break
 
-    if reg not in BRANDS:
+    if reg not in known_brands:
         labels = shown.split(".")
         for brand in sorted(BRANDS):
             head = brand.split(".")[0]
@@ -1148,6 +1173,7 @@ class DomainDatabase:
             raise ValueError("нет раздела с доменами")
         self.platforms = self._lines("PLAT")
         self.brands = self._lines("BRND")
+        self.suffixes = self._lines("SUFX")
         self.total = struct.unpack(">I", self.sections["MALW"][1:5])[0]
 
     def _lines(self, tag):

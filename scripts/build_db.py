@@ -320,12 +320,18 @@ def main():
     full_blob, full_count = hash_section(malicious, FULL_BITS)
     white_blob, white_count = hash_section(whitelist, WHITE_BITS)
 
+    # Зоны второго уровня вроде com.hk: без них google.com.hk выглядит как
+    # сайт в зоне com.hk, притворяющийся Google.
+    suffixes = sorted(r for r in rules if r.count(".") == 1)
+    log("  зон второго уровня: %d" % len(suffixes))
+
     full_size = write_db(os.path.join(OUT_DIR, "full.lgdb"), built_day, [
         ("MALW", full_blob),
         ("WHIT", white_blob),
         ("BRND", "\n".join(brands).encode("utf-8")),
         ("TLDR", "\n".join(tld_lines).encode("utf-8")),
         ("PLAT", "\n".join(sorted(platforms)).encode("utf-8")),
+        ("SUFX", "\n".join(suffixes).encode("utf-8")),
     ])
 
     report.update({
@@ -333,6 +339,7 @@ def main():
         "whitelist": {"entries": white_count, "hash_bits": WHITE_BITS},
         "brands": len(brands),
         "platforms": len(platforms),
+        "suffixes": len(suffixes),
         "removed_by_whitelist": len(removed),
         "removed_popular_subdomains": len(dropped),
     })
