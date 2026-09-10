@@ -44,5 +44,5 @@ jobs:
               --latest=false
           fi
           gh release upload feeds \
-            db/core.lgdb db/full.lgdb db/manifest.json \
+            db/full.lgdb db/manifest.json \
             --clobber

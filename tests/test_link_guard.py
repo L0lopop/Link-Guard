@@ -242,7 +242,6 @@ def load_plugin(minimal=False):
 
 
 lg = load_plugin()
-lg.fetch_rules = lambda timeout=10: None
 
 failures = []
 
@@ -807,47 +806,42 @@ check("ссылка от контакта помечена доверенной"
 plugin._anchors.clear()
 plugin._sources.clear()
 
-print("\nПравила из репозитория")
-check("мусор в списки не попадает",
-      lg.sanitize_rules_list(["ok.example", 42, "", "с пробелом", "x" * 200]) == ["ok.example"],
-      lg.sanitize_rules_list(["ok.example", 42, "", "с пробелом", "x" * 200]))
-check("не список — пустой результат", lg.sanitize_rules_list("строка") == [])
+print("\nСписки внутри плагина")
+# Раньше эти записи приезжали отдельным файлом из репозитория.
+# Файла больше нет, и проверка следит, что при переносе ничего не выпало.
+for brand in ("aliexpress.ru", "citilink.ru", "dns-shop.ru", "mvideo.ru",
+              "eldorado.ru", "lamoda.ru", "sportmaster.ru", "rzd.ru",
+              "aeroflot.ru", "pochtabank.ru", "raiffeisen.ru", "psbank.ru",
+              "gazprombank.ru", "sovcombank.ru", "yoomoney.ru", "sbermarket.ru",
+              "samokat.ru", "vkusvill.ru", "rutube.ru", "twitch.tv",
+              "epicgames.com", "roblox.com", "steamgifts.com"):
+    check("бренд %s на месте" % brand, brand in lg.BRANDS)
 
-before_brands = len(lg.BRANDS)
-added = lg.apply_rules({"version": 7, "brands": ["novyibank.ru"],
-                        "trackers": ["newclid"], "bait": ["razblokirovka"],
-                        "tracker_prefixes": ["zz_"], "risky_tld": ["bogus"]})
-check("правила добавили записи", added == 5, added)
-check("версия правил запомнена", lg.RULES_VERSION == 7, lg.RULES_VERSION)
-check("встроенные бренды не потерялись", len(lg.BRANDS) == before_brands + 1)
-check("новый бренд участвует в проверке",
-      lg.analyze("https://novyibank.ru.pay.top/enter").risk == lg.HIGH,
-      lg.analyze("https://novyibank.ru.pay.top/enter").flags)
-check("новый трекер вырезается",
-      lg.clean_url("https://shop.ru/x?newclid=1")[0] == "https://shop.ru/x",
-      lg.clean_url("https://shop.ru/x?newclid=1"))
-check("новый префикс вырезается",
-      lg.clean_url("https://shop.ru/x?zz_source=a")[0] == "https://shop.ru/x")
+for tracker in ("erid", "ymclid", "yadclid", "_ga", "_gl", "mc_tc",
+                "sc_cid", "srsltid", "cjevent", "irclickid"):
+    url, removed = lg.clean_url("https://shop.ru/x?%s=1" % tracker)
+    check("метка %s вырезается" % tracker, url == "https://shop.ru/x", url)
 
-check("битые правила ничего не ломают", lg.apply_rules("не словарь") == 0)
+for prefix in ("matomo_", "sc_"):
+    url, _ = lg.clean_url("https://shop.ru/x?%ssource=a" % prefix)
+    check("префикс %s вырезается" % prefix, url == "https://shop.ru/x", url)
 
-lg.fetch_rules = lambda timeout=10: {"version": 9, "brands": ["setevoi-bank.ru"]}
-plugin.set_setting("rules_checked_at", 0)
-plugin._refresh_rules(manual=True)
-check("правила из сети применяются", "setevoi-bank.ru" in lg.BRANDS)
-check("версия из сети запомнена", lg.RULES_VERSION == 9, lg.RULES_VERSION)
-check("файл правил сохранён на диск",
-      os.path.exists(plugin._rules_path()), plugin._rules_path())
-lg.fetch_rules = lambda timeout=10: None
-check("после мусора списки целы", "novyibank.ru" in lg.BRANDS)
+for short in ("goo.su", "clck.su", "kurl.ru", "shrturi.com", "tlgg.ru"):
+    check("сокращатель %s узнан" % short,
+          lg.analyze("https://%s/abc" % short).is_shortener)
 
-import json as _json
-with open(os.path.join(ROOT, "rules.json"), encoding="utf-8") as fh:
-    shipped = _json.load(fh)
-check("rules.json в репозитории разбирается",
-      isinstance(shipped, dict) and shipped["version"] >= 1)
-check("в нём только списки и служебные поля",
-      all(isinstance(v, (list, int, str)) for v in shipped.values()), list(shipped))
+for zone in ("buzz", "cricket", "download", "loan", "party",
+             "review", "science", "stream", "trade", "webcam"):
+    check("зона .%s помечена" % zone, zone in lg.RISKY_TLD)
+
+for bait in ("oplata", "dostavka", "posylka", "shtraf", "vozvrat", "vyplata",
+             "kompensaciya", "podtverdite", "razblokirovka", "verifikaciya"):
+    check("приманка %s на месте" % bait, bait in lg.BAIT_WORDS)
+
+check("механизма внешних списков больше нет",
+      not hasattr(lg, "fetch_rules") and not hasattr(lg, "apply_rules"))
+check("файла rules.json в репозитории нет",
+      not os.path.exists(os.path.join(ROOT, "rules.json")))
 
 print("\nВозраст домена")
 v = lg.analyze("https://pay-now.top/enter")
@@ -1044,7 +1038,7 @@ GOOD = ["primer-horoshiy-sayt-s-dlinnym-imenem.top"]
 
 
 def make_database(bad=BAD, good=GOOD, platforms=("pages.dev",)):
-    malw, _ = build_db.hash_section(bad, build_db.CORE_BITS)
+    malw, _ = build_db.hash_section(bad, build_db.FULL_BITS)
     whit, _ = build_db.hash_section(good, build_db.WHITE_BITS)
     sections = [
         ("MALW", malw),
@@ -1118,17 +1112,49 @@ restored = lg.read_database(good_path)
 check("целая база с диска читается", restored is not None and restored.total == len(BAD))
 os.unlink(good_path)
 
-print("\nБаза: настройки")
+print("\nБаза: настройки и расписание")
 db_plugin = lg.LinkGuardPlugin()
 db_plugin.on_plugin_load()
-db_plugin.set_setting("db_mode", 0)
-check("режим «выключена» читается", db_plugin._database_mode() == 0)
+db_plugin.set_setting("use_database", False)
+check("тумблер «выключено» читается", not db_plugin._database_enabled())
 db_plugin._load_database()
 check("при выключенной базе она не подставляется", lg.active_database() is None)
-db_plugin.set_setting("db_mode", 2)
-check("режим «полная» читается", db_plugin._database_mode() == 2)
+db_plugin.set_setting("use_database", True)
+check("тумблер «включено» читается", db_plugin._database_enabled())
 check("состояние базы описано словами",
       isinstance(db_plugin._database_status(), str) and db_plugin._database_status())
+check("качается только полная база", lg.DB_NAME == "full.lgdb", lg.DB_NAME)
+
+# Ночное окно: подменяем часы и проверяем, когда плагин решает качать.
+real_localtime = lg.time.localtime
+
+
+def at_hour(hour):
+    return lambda *args: types.SimpleNamespace(tm_hour=hour)
+
+
+svezhaya = types.SimpleNamespace(age_days=0, total=10)
+staraya = types.SimpleNamespace(age_days=lg.DB_STALE_DAYS, total=10)
+
+db_plugin.set_setting("db_checked_at", 0)
+lg.time.localtime = at_hour(3)
+check("ночью свежая база обновляется", db_plugin._due_for_refresh(svezhaya))
+lg.time.localtime = at_hour(14)
+check("днём свежую базу не трогаем", not db_plugin._due_for_refresh(svezhaya))
+check("днём устаревшую всё же качаем", db_plugin._due_for_refresh(staraya))
+check("днём при отсутствии базы качаем", db_plugin._due_for_refresh(None))
+lg.time.localtime = at_hour(0)
+check("в полночь окно уже открыто", db_plugin._due_for_refresh(svezhaya))
+lg.time.localtime = at_hour(6)
+check("в шесть утра окно уже закрыто", not db_plugin._due_for_refresh(svezhaya))
+
+lg.time.localtime = at_hour(3)
+db_plugin.set_setting("db_checked_at", lg.time.time())
+check("дважды за ночь не качаем", not db_plugin._due_for_refresh(svezhaya))
+lg.time.localtime = real_localtime
+
+check("обновления проверяются раз в шесть часов",
+      lg.UPDATE_INTERVAL == 6 * 60 * 60, lg.UPDATE_INTERVAL)
 
 print("\nСовместимость со старым SDK")
 try:

@@ -228,20 +228,9 @@ STRINGS = {
         "src_trusted": "Ссылка от вашего контакта",
         "sw_age": "Узнавать возраст домена",
         "sw_age_sub": "Для подозрительных ссылок спрашивает дату регистрации у rdap.org — домен уходит на сторонний сервис",
-        "sw_rules": "Пополнять списки из репозитория",
-        "sw_rules_sub": "Раз в сутки подтягивает новые бренды и трекеры. Правила только добавляют проверки",
-        "rules_line": "Списки правил: версия %s",
-        "rules_sub": "Нажмите, чтобы обновить сейчас",
-        "rules_updated": "Списки обновлены: версия %s",
-        "rules_none": "Списки не обновились",
         "db_title": "База мошеннических сайтов",
-        "db_mode": "Объём базы",
-        "db_mode_off": "Выключена",
-        "db_mode_core": "Ядро — 1,4 МБ",
-        "db_mode_full": "Полная — 8,3 МБ",
-        "db_mode_hint": "Ядро содержит сайты, которые притворяются известными "
-                        "сервисами. Полная добавляет остальные, но качается дольше "
-                        "и занимает больше места.",
+        "sw_database": "Проверять по базе",
+        "sw_database_sub": "Обновляется сама по ночам. Проверка идёт на устройстве, адреса никуда не отправляются",
         "db_refresh": "Обновить базу",
         "db_updated": "База обновлена: %s записей",
         "db_failed": "База не обновилась",
@@ -373,20 +362,9 @@ STRINGS = {
         "src_trusted": "The link comes from your contact",
         "sw_age": "Look up domain age",
         "sw_age_sub": "Asks rdap.org for the registration date of suspicious domains — the domain leaves your device",
-        "sw_rules": "Update lists from the repository",
-        "sw_rules_sub": "Pulls new brands and trackers once a day. Rules can only add checks",
-        "rules_line": "Rule lists: version %s",
-        "rules_sub": "Tap to update now",
-        "rules_updated": "Lists updated: version %s",
-        "rules_none": "Lists were not updated",
         "db_title": "Scam site database",
-        "db_mode": "Database size",
-        "db_mode_off": "Off",
-        "db_mode_core": "Core — 1.4 MB",
-        "db_mode_full": "Full — 8.3 MB",
-        "db_mode_hint": "The core holds sites impersonating well-known services. "
-                        "The full one adds the rest but takes longer to download "
-                        "and more space.",
+        "sw_database": "Check against the database",
+        "sw_database_sub": "Updates itself overnight. Lookups happen on the device, no address is sent anywhere",
         "db_refresh": "Update database",
         "db_updated": "Database updated: %s entries",
         "db_failed": "The database was not updated",
@@ -446,9 +424,20 @@ TRACKER_EXACT = {
     "epik",
     "otc",
     "cvid",
+    "erid",
+    "ymclid",
+    "yadclid",
+    "_ga",
+    "_gl",
+    "mc_tc",
+    "sc_cid",
+    "srsltid",
+    "cjevent",
+    "irclickid",
 }
 
-TRACKER_PREFIXES = ("utm_", "pk_", "mtm_", "piwik_", "hsa_", "at_custom", "stm_")
+TRACKER_PREFIXES = ("utm_", "pk_", "mtm_", "piwik_", "hsa_", "at_custom", "stm_",
+                    "matomo_", "sc_")
 
 # Эти режем только в агрессивном режиме: иногда они несут смысл.
 TRACKER_AGGRESSIVE = {
@@ -498,6 +487,11 @@ SHORTENERS = {
     "short.io",
     "l.ead.me",
     "dfl.to",
+    "goo.su",
+    "clck.su",
+    "kurl.ru",
+    "shrturi.com",
+    "tlgg.ru",
 }
 
 # Домены, под которые чаще всего маскируются. Сравниваем расстоянием Левенштейна.
@@ -546,6 +540,29 @@ BRANDS = {
     "megafon.ru",
     "beeline.ru",
     "mts.ru",
+    "aliexpress.ru",
+    "citilink.ru",
+    "dns-shop.ru",
+    "mvideo.ru",
+    "eldorado.ru",
+    "lamoda.ru",
+    "sportmaster.ru",
+    "rzd.ru",
+    "aeroflot.ru",
+    "pochtabank.ru",
+    "raiffeisen.ru",
+    "psbank.ru",
+    "gazprombank.ru",
+    "sovcombank.ru",
+    "yoomoney.ru",
+    "sbermarket.ru",
+    "samokat.ru",
+    "vkusvill.ru",
+    "rutube.ru",
+    "twitch.tv",
+    "epicgames.com",
+    "roblox.com",
+    "steamgifts.com",
 }
 
 # Слишком общие слова: встречаются в поддоменах честных сайтов (mail.company.com).
@@ -587,6 +604,16 @@ RISKY_TLD = {
     "ga",
     "cf",
     "gq",
+    "buzz",
+    "cricket",
+    "download",
+    "loan",
+    "party",
+    "review",
+    "science",
+    "stream",
+    "trade",
+    "webcam",
 }
 
 # Слова-приманки в адресе. Сами по себе не улика, но в сумме с прочим — сигнал.
@@ -611,6 +638,16 @@ BAIT_WORDS = (
     "podarok",
     "vyigrysh",
     "bonus-ru",
+    "oplata",
+    "dostavka",
+    "posylka",
+    "shtraf",
+    "vozvrat",
+    "vyplata",
+    "kompensaciya",
+    "podtverdite",
+    "razblokirovka",
+    "verifikaciya",
 )
 
 DANGEROUS_EXT = (
@@ -1056,14 +1093,7 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
 
 REPO_URL = "https://github.com/L0lopop/Link-Guard"
 UPDATE_URL = "https://raw.githubusercontent.com/L0lopop/Link-Guard/main/update.json"
-UPDATE_INTERVAL = 24 * 60 * 60
-
-# Списки пополняются файлом из репозитория: новые бренды и метки не требуют выпуска версии.
-RULES_URL = "https://raw.githubusercontent.com/L0lopop/Link-Guard/main/rules.json"
-RULES_INTERVAL = 24 * 60 * 60
-RULES_MAX_ITEMS = 2000
-RULES_MAX_LEN = 80
-RULES_VERSION = 0
+UPDATE_INTERVAL = 6 * 60 * 60
 
 # RDAP отдаёт дату регистрации домена бесплатно и без ключей.
 RDAP_URL = "https://rdap.org/domain/%s"
@@ -1071,53 +1101,6 @@ AGE_ALARM_DAYS = 30
 AGE_NOTE_DAYS = 120
 AGE_CACHE_MAX = 200
 AGE_CACHE_TTL = 7 * 24 * 60 * 60
-
-
-def sanitize_rules_list(value):
-    """Пропускаем только короткие строки без пробелов — остальное отбрасываем."""
-    if not isinstance(value, (list, tuple)):
-        return []
-    clean = []
-    for item in list(value)[:RULES_MAX_ITEMS]:
-        if not isinstance(item, str):
-            continue
-        text = item.strip().lower()
-        if text and len(text) <= RULES_MAX_LEN and " " not in text:
-            clean.append(text)
-    return clean
-
-
-def apply_rules(data):
-    """Правила только добавляют проверки: отключить защиту через них нельзя."""
-    global TRACKER_PREFIXES, BAIT_WORDS, RULES_VERSION
-    if not isinstance(data, dict):
-        return 0
-
-    added = 0
-    for key, target in (("brands", BRANDS), ("trackers", TRACKER_EXACT),
-                        ("shorteners", SHORTENERS), ("risky_tld", RISKY_TLD),
-                        ("generic_labels", GENERIC_LABELS)):
-        for item in sanitize_rules_list(data.get(key)):
-            if item not in target:
-                target.add(item)
-                added += 1
-
-    fresh = [p for p in sanitize_rules_list(data.get("tracker_prefixes"))
-             if p not in TRACKER_PREFIXES]
-    if fresh:
-        TRACKER_PREFIXES = tuple(TRACKER_PREFIXES) + tuple(fresh)
-        added += len(fresh)
-
-    fresh = [b for b in sanitize_rules_list(data.get("bait")) if b not in BAIT_WORDS]
-    if fresh:
-        BAIT_WORDS = tuple(BAIT_WORDS) + tuple(fresh)
-        added += len(fresh)
-
-    try:
-        RULES_VERSION = int(data.get("version", 0) or 0)
-    except (TypeError, ValueError):
-        RULES_VERSION = 0
-    return added
 
 
 def add_age_flag(verdict, days):
@@ -1130,26 +1113,14 @@ def add_age_flag(verdict, days):
         verdict.add(LOW, phrase("f_age_young", days))
 
 
-def fetch_rules(timeout=10):
-    try:
-        import requests
-        resp = requests.get(RULES_URL, timeout=timeout,
-                            params={"ts": int(time.time())},
-                            headers={"User-Agent": "LinkGuard/%s" % __version__,
-                                     "Cache-Control": "no-cache"})
-        if resp.status_code != 200 or len(resp.content) > 512 * 1024:
-            return None
-        data = resp.json()
-        return data if isinstance(data, dict) else None
-    except Exception as e:
-        log("LinkGuard: rules fetch failed: %s" % e)
-        return None
-
-
 DB_BASE_URL = "https://github.com/L0lopop/Link-Guard/releases/download/feeds/"
-DB_CORE_NAME = "core.lgdb"
-DB_FULL_NAME = "full.lgdb"
-DB_INTERVAL = 24 * 60 * 60
+DB_NAME = "full.lgdb"
+# Обновляемся ночью, когда телефон обычно на зарядке и в сети.
+DB_NIGHT_FROM = 0
+DB_NIGHT_TO = 6
+DB_MIN_GAP = 20 * 60 * 60
+# Если ночью приложение не открывали, база не должна стареть бесконечно.
+DB_STALE_DAYS = 3
 DB_MAX_BYTES = 24 * 1024 * 1024
 DB_MAGIC = b"LGDB"
 DB_FORMAT = 1
@@ -1410,7 +1381,6 @@ class LinkGuardPlugin(BasePlugin):
         self._sources = {}
         self._ages = {}
 
-        self._step("rules", self._load_rules)
         self._step("database", self._load_database)
         self._step("openUrl", self._install_open_url_hook)
         self._step("updates", self._install_update_hook)
@@ -1487,19 +1457,14 @@ class LinkGuardPlugin(BasePlugin):
                    subtext=phrase("sw_age_sub")),
 
             Header(text=phrase("db_title")),
-            Selector(key="db_mode", text=phrase("db_mode"), default=1,
-                     items=[phrase("db_mode_off"), phrase("db_mode_core"),
-                            phrase("db_mode_full")]),
+            Switch(key="use_database", text=phrase("sw_database"), default=True,
+                   subtext=phrase("sw_database_sub")),
             Text(text=phrase("db_refresh"), subtext=self._database_status(),
                  on_click=self._on_refresh_database_click),
 
             Header(text=phrase("hdr_updates")),
             Switch(key="check_updates", text=phrase("sw_updates"), default=True,
                    subtext=phrase("sw_updates_sub")),
-            Switch(key="use_rules", text=phrase("sw_rules"), default=True,
-                   subtext=phrase("sw_rules_sub")),
-            Text(text=phrase("rules_line", RULES_VERSION), subtext=phrase("rules_sub"),
-                 on_click=self._on_refresh_rules_click),
             Text(text=phrase("btn_check_now"), subtext=phrase("version_line", __version__),
                  accent=True, on_click=self._on_check_updates_click),
 
@@ -1638,95 +1603,44 @@ class LinkGuardPlugin(BasePlugin):
             self._debug("load: %s упал — %s" % (name, e))
             return False
 
-    def _rules_path(self):
-        folders = self._writable_dirs()
-        return os.path.join(folders[0], "link_guard_rules.json") if folders else None
-
-    def _load_rules(self):
-        """Списки с диска, затем при необходимости обновление из репозитория."""
-        if not self.get_setting("use_rules", True):
-            return
-        path = self._rules_path()
-        if path and os.path.exists(path):
-            try:
-                import json
-                with open(path, "r", encoding="utf-8") as handle:
-                    added = apply_rules(json.load(handle))
-                self._debug("rules: с диска, версия %s, добавлено %s" % (RULES_VERSION, added))
-            except Exception as e:
-                self._debug("rules: файл не прочитан: %s" % e)
-        try:
-            last = float(self.get_setting("rules_checked_at", 0) or 0)
-        except (TypeError, ValueError):
-            last = 0
-        if time.time() - last >= RULES_INTERVAL:
-            self._run_background(lambda: self._refresh_rules(manual=False))
-
-    def _refresh_rules(self, manual=False):
-        """Скачивает rules.json, объединяет со встроенными списками и сохраняет на диск."""
-        data = fetch_rules()
-        self.set_setting("rules_checked_at", time.time())
-        if not data:
-            if manual:
-                run_on_ui_thread(lambda: self._toast(phrase("rules_none")))
-            return
-        added = apply_rules(data)
-        self._debug("rules: из сети, версия %s, добавлено %s" % (RULES_VERSION, added))
-        path = self._rules_path()
-        if path:
-            try:
-                import json
-                with open(path, "w", encoding="utf-8") as handle:
-                    json.dump(data, handle, ensure_ascii=False)
-            except Exception as e:
-                self._debug("rules: не сохранились: %s" % e)
-        if getattr(self, "_cache", None) is not None:
-            self._cache.clear()
-        version = RULES_VERSION
-        if manual:
-            run_on_ui_thread(lambda: self._toast(phrase("rules_updated", version)))
-
-    def _on_refresh_rules_click(self, *args):
-        self._toast(phrase("toast_checking"))
-        self._run_background(lambda: self._refresh_rules(manual=True))
-
-    def _database_mode(self):
-        """0 — база выключена, 1 — ядро, 2 — полная."""
-        try:
-            return int(self.get_setting("db_mode", 1) or 0)
-        except (TypeError, ValueError):
-            return 1
+    def _database_enabled(self):
+        return bool(self.get_setting("use_database", True))
 
     def _database_path(self):
         folders = self._writable_dirs()
         return os.path.join(folders[0], "link_guard_domains.lgdb") if folders else None
 
-    def _load_database(self):
-        """База с диска, затем при необходимости обновление из репозитория."""
-        if not self._database_mode():
-            install_database(None)
-            return
-        path = self._database_path()
-        database = read_database(path)
-        if database is not None:
-            install_database(database)
-            self._debug("db: с диска, %d записей, возраст %d дн." % (
-                database.total, database.age_days))
+    def _due_for_refresh(self, database):
+        """Ночью — раз в сутки. Днём — только если базы нет или она устарела."""
         try:
             last = float(self.get_setting("db_checked_at", 0) or 0)
         except (TypeError, ValueError):
             last = 0
-        stale = database is None or database.age_days >= 1
-        if stale and time.time() - last >= DB_INTERVAL:
+        if time.time() - last < DB_MIN_GAP:
+            return False
+        if database is None or database.age_days >= DB_STALE_DAYS:
+            return True
+        hour = time.localtime().tm_hour
+        return DB_NIGHT_FROM <= hour < DB_NIGHT_TO
+
+    def _load_database(self):
+        """База с диска, затем при необходимости обновление из репозитория."""
+        if not self._database_enabled():
+            install_database(None)
+            return
+        database = read_database(self._database_path())
+        if database is not None:
+            install_database(database)
+            self._debug("db: с диска, %d записей, возраст %d дн." % (
+                database.total, database.age_days))
+        if self._due_for_refresh(database):
             self._run_background(lambda: self._refresh_database(manual=False))
 
     def _refresh_database(self, manual=False):
         """Скачивает базу, сохраняет на диск и подставляет её взамен старой."""
-        mode = self._database_mode()
-        if not mode:
+        if not self._database_enabled():
             return
-        name = DB_FULL_NAME if mode == 2 else DB_CORE_NAME
-        content = fetch_database(name)
+        content = fetch_database(DB_NAME)
         self.set_setting("db_checked_at", time.time())
         if not content:
             if manual:
@@ -1751,36 +1665,32 @@ class LinkGuardPlugin(BasePlugin):
             except Exception as e:
                 self._debug("db: не сохранилась: %s" % e)
         total = database.total
-        self._debug("db: из сети, %s, %d записей" % (name, total))
+        self._debug("db: из сети, %d записей" % total)
         if manual:
             run_on_ui_thread(lambda: self._toast(phrase("db_updated", total)))
 
     def _on_refresh_database_click(self, *args):
-        if not self._database_mode():
+        if not self._database_enabled():
             self._toast(phrase("db_off"))
             return
         self._toast(phrase("toast_checking"))
         self._run_background(lambda: self._refresh_database(manual=True))
 
     def _sync_database_mode(self):
-        """Сверяет выбранный объём базы с уже загруженным."""
-        mode = self._database_mode()
-        try:
-            applied = int(self.get_setting("db_mode_applied", 1) or 0)
-        except (TypeError, ValueError):
-            applied = 1
-        if mode == applied:
+        """Тумблер выключили или включили — подстраиваем состояние."""
+        enabled = self._database_enabled()
+        if enabled == bool(self.get_setting("db_applied", True)):
             return
-        self.set_setting("db_mode_applied", mode)
+        self.set_setting("db_applied", enabled)
         install_database(None)
         if getattr(self, "_cache", None) is not None:
             self._cache.clear()
-        if mode:
+        if enabled:
             self._run_background(lambda: self._refresh_database(manual=True))
 
     def _database_status(self):
         database = active_database()
-        if not self._database_mode():
+        if not self._database_enabled():
             return phrase("db_status_off")
         if database is None:
             return phrase("db_status_none")

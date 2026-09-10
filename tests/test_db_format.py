@@ -146,22 +146,20 @@ class Database(object):
 def main():
     where = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.environ.get("TEMP", "/tmp"), "lgdb_test")
-    core_path = os.path.join(where, "core.lgdb")
     full_path = os.path.join(where, "full.lgdb")
-    if not os.path.exists(core_path):
-        print("нет файла %s — сначала python scripts/build_db.py" % core_path)
+    if not os.path.exists(full_path):
+        print("нет файла %s — сначала python scripts/build_db.py" % full_path)
         return 1
 
-    print("== чтение файлов ==")
-    core = Database(open(core_path, "rb").read())
+    print("== чтение файла ==")
     full = Database(open(full_path, "rb").read())
-    check(set(core.sections) == {"MALW", "WHIT", "BRND", "TLDR", "PLAT"},
-          "в ядре все пять разделов")
-    check(core.built_day > 20000, "дата сборки записана")
-    check(len(core.brands) == 1000, "тысяча брендов на месте")
-    check(len(core.platforms) > 1000, "платформы общего хостинга собраны")
-    print("  разделы: %s" % ", ".join(sorted(core.sections)))
-    print("  платформ: %d, брендов: %d" % (len(core.platforms), len(core.brands)))
+    check(set(full.sections) == {"MALW", "WHIT", "BRND", "TLDR", "PLAT"},
+          "все пять разделов на месте")
+    check(full.built_day > 20000, "дата сборки записана")
+    check(len(full.brands) == 1000, "тысяча брендов на месте")
+    check(len(full.platforms) > 1000, "платформы общего хостинга собраны")
+    print("  разделы: %s" % ", ".join(sorted(full.sections)))
+    print("  платформ: %d, брендов: %d" % (len(full.platforms), len(full.brands)))
 
     print("== мусор не ломает читалку ==")
     for broken, title in (

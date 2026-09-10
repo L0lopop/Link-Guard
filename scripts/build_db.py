@@ -1,7 +1,7 @@
 """Сборка базы доменов для Link Guard.
 
 Скачивает публичные списки, объединяет их, отсекает популярные сайты
-и записывает два файла: core.lgdb (ядро) и full.lgdb (полная база).
+и записывает файл full.lgdb, который скачивает плагин.
 Запускается из GitHub Actions по расписанию.
 """
 
@@ -40,12 +40,11 @@ PSL_URL = "https://publicsuffix.org/list/public_suffix_list.dat"
 WHITELIST_TOP = 50000
 BRAND_TOP = 1000
 
-CORE_BITS = 44
 FULL_BITS = 40
 WHITE_BITS = 36
 
 MIN_FEEDS = 3
-MIN_CORE = 50000
+MIN_TOTAL = 500000
 
 POPULAR_SUBDOMAIN_LIMIT = 20
 
@@ -53,27 +52,6 @@ POPULAR_SUBDOMAIN_LIMIT = 20
 # строка указателя: значение (8 байт) и смещение в данных (4 байта).
 BLOCK_SIZE = 256
 INDEX_ENTRY = 12
-
-BRAND_MARKERS = (
-    "sber", "tinkoff", "tbank", "vtb", "alfabank", "alfa-bank", "gosuslug",
-    "wildberries", "ozon", "yandex", "mailru", "mail-ru", "vkontakte", "vk-com",
-    "telegram", "tgram", "whatsapp", "binance", "bybit", "metamask", "paypal",
-    "apple", "icloud", "google", "microsoft", "outlook", "netflix", "steam",
-    "roblox", "epicgames", "amazon", "aliexpress", "dns-shop", "mvideo",
-    "eldorado", "rzd", "aeroflot", "pochta", "avito", "drom", "coinbase",
-    "trustwallet", "ledger", "tronlink", "instagram", "facebook", "tiktok",
-    "discord", "twitch", "raiffeisen", "psbank", "gazprombank", "sovcombank",
-    "yoomoney", "sbermarket", "samokat", "vkusvill", "rutube", "citilink",
-    "lamoda", "sportmaster", "megafon", "beeline", "rostelecom",
-)
-
-BAIT_MARKERS = (
-    "oplat", "dostavk", "posylk", "shtraf", "vozvrat", "viplat", "vyplat",
-    "kompensac", "podtverd", "razblok", "verifik", "bonus", "prize", "podarok",
-    "winner", "login", "signin", "sign-in", "secure", "account", "wallet",
-    "airdrop", "claim", "support", "update", "confirm", "recovery", "unlock",
-    "refund", "invoice", "payment", "banking", "verify", "restore",
-)
 
 HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9\-_]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-_]*[a-z0-9])?)+$")
 IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
@@ -326,15 +304,8 @@ def main():
     malicious = list(membership)
     log("== итог: %d уникальных вредоносных хостов ==" % len(malicious))
 
-    core = [
-        h for h in malicious
-        if len(membership[h]) >= 2
-        or any(marker in h for marker in BRAND_MARKERS)
-        or any(marker in h for marker in BAIT_MARKERS)
-    ]
-    log("  ядро: %d" % len(core))
-    if len(core) < MIN_CORE:
-        log("ОШИБКА: ядро подозрительно маленькое, публиковать не будем")
+    if len(malicious) < MIN_TOTAL:
+        log("ОШИБКА: база подозрительно маленькая, публиковать не будем")
         return 1
 
     tld_counts = Counter(h.rsplit(".", 1)[-1] for h in malicious)
@@ -346,23 +317,18 @@ def main():
     brands = popular[:BRAND_TOP]
     built_day = int(time.time() // 86400)
 
-    core_blob, core_count = hash_section(core, CORE_BITS)
     full_blob, full_count = hash_section(malicious, FULL_BITS)
     white_blob, white_count = hash_section(whitelist, WHITE_BITS)
 
-    shared = [
+    full_size = write_db(os.path.join(OUT_DIR, "full.lgdb"), built_day, [
+        ("MALW", full_blob),
         ("WHIT", white_blob),
         ("BRND", "\n".join(brands).encode("utf-8")),
         ("TLDR", "\n".join(tld_lines).encode("utf-8")),
         ("PLAT", "\n".join(sorted(platforms)).encode("utf-8")),
-    ]
-    core_size = write_db(os.path.join(OUT_DIR, "core.lgdb"), built_day,
-                         [("MALW", core_blob)] + shared)
-    full_size = write_db(os.path.join(OUT_DIR, "full.lgdb"), built_day,
-                         [("MALW", full_blob)] + shared)
+    ])
 
     report.update({
-        "core": {"entries": core_count, "bytes": core_size, "hash_bits": CORE_BITS},
         "full": {"entries": full_count, "bytes": full_size, "hash_bits": FULL_BITS},
         "whitelist": {"entries": white_count, "hash_bits": WHITE_BITS},
         "brands": len(brands),
@@ -374,7 +340,6 @@ def main():
         json.dump(report, handle, ensure_ascii=False, indent=2)
 
     log("== файлы ==")
-    log("  core.lgdb  %8.2f МБ  %d записей" % (core_size / 1048576, core_count))
     log("  full.lgdb  %8.2f МБ  %d записей" % (full_size / 1048576, full_count))
     log("готово за %d с" % (datetime.now(timezone.utc) - started).seconds)
     return 0
