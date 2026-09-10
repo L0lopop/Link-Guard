@@ -885,9 +885,20 @@ check("у домена спрашиваем", asked == ["example.com"], asked)
 lg.domain_age_days = real_rdap
 
 print("\nВозраст в разборе")
-check("дни", lg.human_age(12) == lg.phrase("age_days", 12))
-check("месяцы", lg.human_age(200) == lg.phrase("age_months", 6), lg.human_age(200))
-check("годы", lg.human_age(10670) == lg.phrase("age_years", 29), lg.human_age(10670))
+check("меньше суток", lg.human_age(0) == lg.phrase("age_today"), lg.human_age(0))
+check("один день", lg.human_age(1) == "1 день", lg.human_age(1))
+check("два дня", lg.human_age(2) == "2 дня", lg.human_age(2))
+check("пять дней", lg.human_age(5) == "5 дней", lg.human_age(5))
+check("одиннадцать дней", lg.human_age(11) == "11 дней", lg.human_age(11))
+check("недели", lg.human_age(21) == "3 недели", lg.human_age(21))
+check("одна неделя", lg.human_age(14) == "2 недели", lg.human_age(14))
+check("месяцы", lg.human_age(200) == "6 месяцев", lg.human_age(200))
+check("один год", lg.human_age(740) == "2 года", lg.human_age(740))
+check("двадцать два года", lg.human_age(8030) == "22 года", lg.human_age(8030))
+check("двадцать девять лет", lg.human_age(10670) == "29 лет", lg.human_age(10670))
+check("символ в единственном числе",
+      "на 1 символ" in [f[1] for f in lg.analyze("https://sberbamk.ru/login").flags][0],
+      [f[1] for f in lg.analyze("https://sberbamk.ru/login").flags])
 
 aged = lg.analyze("https://vk.com:8080/feed")
 lg.add_age_flag(aged, 10670)
@@ -901,6 +912,47 @@ lg.add_age_flag(young, 5)
 check("свежий домен и тревожит, и виден в окне",
       young.risk == lg.HIGH and lg.phrase("lbl_age", lg.human_age(5)) in plugin._describe(young),
       plugin._describe(young))
+
+print("\nРевизия: смещения, скачанный файл, счётчик")
+emoji_text = "🎁 держи sberbank.ru прямо тут"
+offset = len(emoji_text[:emoji_text.index("sberbank.ru")].encode("utf-16-le")) // 2
+plugin._anchors.clear()
+plugin._index_anchors(emoji_text,
+                      FakeEntities([FakeEntity(offset, len("sberbank.ru"),
+                                               "https://phish.top/enter")]))
+check("эмодзи перед ссылкой не сдвигает подпись",
+      plugin._anchors.get("https://phish.top/enter") == "sberbank.ru", plugin._anchors)
+plugin._anchors.clear()
+
+good = b'__id__ = "link_guard"\n__version__ = "9.9.9"\n'
+check("наш файл распознан", plugin._looks_like_our_plugin(good))
+check("чужой файл отвергнут", not plugin._looks_like_our_plugin(b'__id__ = "other_plugin"'))
+check("пустой файл отвергнут", not plugin._looks_like_our_plugin(b""))
+check("огромный файл отвергнут",
+      not plugin._looks_like_our_plugin(good + b"x" * (3 * 1024 * 1024)))
+
+if handler is not None:
+    plugin._on_reset_stats_click()
+    plugin._cache.clear()
+    plugin._counted.clear()
+    plugin._sources.clear()
+    plugin.set_setting("show_mode", 1)
+    param = FakeParam("https://promo-gift.top/x?utm_source=a&fbclid=b")
+    handler.before_hooked_method(param)
+    check("до решения пользователя метки не засчитаны",
+          plugin._stat("stats_cleaned") == 0, plugin._stat("stats_cleaned"))
+    FakeDialog.last.press("negative")
+    check("после отмены тоже не засчитаны",
+          plugin._stat("stats_cleaned") == 0, plugin._stat("stats_cleaned"))
+
+    plugin._cache.clear()
+    param = FakeParam("https://promo-gift.top/y?utm_source=a&fbclid=b")
+    handler.before_hooked_method(param)
+    FakeDialog.last.press("positive")
+    check("после «Открыть» метки засчитаны",
+          plugin._stat("stats_cleaned") == 2, plugin._stat("stats_cleaned"))
+    plugin.set_setting("show_mode", 0)
+    plugin._on_reset_stats_click()
 
 print("\nИсточник ссылки")
 if handler is not None:
