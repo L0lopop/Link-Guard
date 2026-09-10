@@ -857,6 +857,46 @@ v4 = lg.analyze("https://ozon.ru/product/3")
 lg.add_age_flag(v4, None)
 check("неизвестный возраст ничего не добавляет", not v4.flags)
 
+print("\nЛокальная сеть и IP")
+for host in ("192.168.1.129", "10.8.0.2", "127.0.0.1", "172.16.0.5"):
+    check("%s распознан как локальный" % host, lg.is_private_ip(host))
+check("внешний адрес локальным не считается", not lg.is_private_ip("185.11.22.33"))
+
+home = lg.analyze("http://192.168.1.129:8096")
+check("домашний сервер не подозрителен", not home.suspicious, home.flags)
+check("но отмечен как локальный",
+      any(lg.t("f_ip_local") == text for _, text in home.flags), home.flags)
+foreign = lg.analyze("http://185.11.22.33/wallet/recovery")
+check("чужой IP остаётся подозрительным", foreign.suspicious, foreign.flags)
+
+asked = []
+real_rdap = lg.domain_age_days
+lg.domain_age_days = lambda domain, timeout=8: asked.append(domain) or 100
+plugin._ages.clear()
+plugin._domain_age("1.129")
+check("у IP возраст не спрашиваем", not asked, asked)
+plugin._domain_age("example.com")
+check("у домена спрашиваем", asked == ["example.com"], asked)
+lg.domain_age_days = real_rdap
+
+print("\nВозраст в разборе")
+check("дни", lg.human_age(12) == lg.t("age_days", 12))
+check("месяцы", lg.human_age(200) == lg.t("age_months", 6), lg.human_age(200))
+check("годы", lg.human_age(10670) == lg.t("age_years", 29), lg.human_age(10670))
+
+aged = lg.analyze("https://vk.com:8080/feed")
+lg.add_age_flag(aged, 10670)
+check("старый домен не добавляет тревогу", len(aged.flags) == 1, aged.flags)
+check("но возраст попадает в окно",
+      lg.t("lbl_age", lg.human_age(10670)) in plugin._describe(aged),
+      plugin._describe(aged))
+
+young = lg.analyze("https://pay-now.top/enter")
+lg.add_age_flag(young, 5)
+check("свежий домен и тревожит, и виден в окне",
+      young.risk == lg.HIGH and lg.t("lbl_age", lg.human_age(5)) in plugin._describe(young),
+      plugin._describe(young))
+
 print("\nИсточник ссылки")
 if handler is not None:
     plugin._cache.clear()

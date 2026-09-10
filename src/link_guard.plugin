@@ -180,6 +180,11 @@ STRINGS = {
         "f_subdomain": "«%s» стоит в поддомене, а сам сайт — %s",
         "f_anchor": "В сообщении ссылка подписана как %s, а ведёт на %s",
         "f_ip": "Вместо домена IP-адрес",
+        "f_ip_local": "Адрес в локальной сети",
+        "lbl_age": "Возраст домена: %s",
+        "age_days": "%s дней",
+        "age_months": "%s мес.",
+        "age_years": "%s лет",
         "f_badport": "После двоеточия стоит не номер порта — адрес сломан или замаскирован",
         "f_port": "Нестандартный порт %s",
         "f_tld": "Доменная зона .%s часто используется для одноразовых мошеннических сайтов",
@@ -301,6 +306,11 @@ STRINGS = {
         "f_subdomain": "«%s» sits in a subdomain while the site itself is %s",
         "f_anchor": "The message labels this link as %s, but it leads to %s",
         "f_ip": "An IP address instead of a domain",
+        "f_ip_local": "An address on your local network",
+        "lbl_age": "Domain age: %s",
+        "age_days": "%s days",
+        "age_months": "%s months",
+        "age_years": "%s years",
         "f_badport": "What follows the colon is not a port number — the address is broken or disguised",
         "f_port": "Non-standard port %s",
         "f_tld": "The .%s zone is often used for throwaway scam sites",
@@ -415,6 +425,27 @@ ANCHOR_RE = re.compile(
     r"^(?:https?://)?([a-z0-9\-._~Ѐ-ӿ]+\.[a-zЀ-ӿ]{2,})(?:[/?#:]|$)",
     re.IGNORECASE,
 )
+
+IP_RE = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+DOMAIN_RE = re.compile(r"[a-z0-9\-.]+\.[a-zЀ-ӿ]{2,}")
+
+
+def is_private_ip(host):
+    try:
+        a, b = (int(part) for part in host.split(".")[:2])
+    except (TypeError, ValueError):
+        return False
+    return (a == 10 or a == 127 or (a == 192 and b == 168)
+            or (a == 172 and 16 <= b <= 31) or (a == 169 and b == 254))
+
+
+def human_age(days):
+    if days < 60:
+        return t("age_days", days)
+    if days < 730:
+        return t("age_months", days // 30)
+    return t("age_years", days // 365)
+
 
 HIGH, MEDIUM, LOW, INFO = "high", "medium", "low", "info"
 _RISK_ORDER = {INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3}
@@ -648,8 +679,9 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
     if shown_as and shown_as != reg and shown_as != registrable(shown):
         v.add(HIGH, t("f_anchor", shown_as, reg))
 
-    if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", host):
-        v.add(MEDIUM, t("f_ip"))
+    if IP_RE.fullmatch(host):
+        v.add(LOW if is_private_ip(host) else MEDIUM,
+              t("f_ip_local") if is_private_ip(host) else t("f_ip"))
     try:
         port = parts.port
     except ValueError:
@@ -784,7 +816,7 @@ def domain_age_days(domain, timeout=8):
                                      "Accept": "application/rdap+json"})
         if resp.status_code != 200:
             log("LinkGuard: rdap %s HTTP %s" % (domain, resp.status_code))
-            return resp.status_code
+            return None
         for event in resp.json().get("events", []) or []:
             if str(event.get("eventAction", "")).lower() != "registration":
                 continue
@@ -1687,15 +1719,13 @@ class LinkGuardPlugin(BasePlugin):
         hit = cache.get(domain)
         if hit and now - hit[0] < AGE_CACHE_TTL:
             return hit[1]
+        if not DOMAIN_RE.fullmatch(domain or ""):
+            self._debug("rdap: %s — не доменное имя, пропускаю" % domain)
+            return None
         self._debug("rdap: спрашиваю %s" % domain)
         days = domain_age_days(domain)
-        if isinstance(days, int) and days > 1000000:
-            days = None
         if days is None or days < 0:
             self._debug("rdap: %s — ответа нет" % domain)
-            return None
-        if days > 40000:
-            self._debug("rdap: %s — код ответа %s" % (domain, days))
             return None
         if len(cache) >= AGE_CACHE_MAX:
             cache.clear()
@@ -1730,6 +1760,8 @@ class LinkGuardPlugin(BasePlugin):
         if verdict.removed_params:
             lines.append(t("lbl_removed", len(verdict.removed_params),
                            ", ".join(verdict.removed_params[:4])))
+        if verdict.age_days is not None:
+            lines.append(t("lbl_age", human_age(verdict.age_days)))
         if verdict.source == "unknown":
             lines.append(t("src_stranger"))
         elif verdict.source == "trusted":
