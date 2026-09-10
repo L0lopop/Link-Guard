@@ -961,9 +961,6 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         verdict.cleaned, verdict.removed_params = clean_url(url, aggressive)
         return verdict
 
-    # Готовая база перевешивает догадки: если сайт в ней есть — это не
-    # подозрение, а факт. Если он, наоборот, из числа посещаемых, мелкие
-    # придирки к зоне и длине адреса только мешают.
     known_good = False
     database = active_database()
     if database is not None:
@@ -1161,11 +1158,7 @@ DB_INDEX_ENTRY = 12
 
 
 class DomainDatabase:
-    """Список мошеннических доменов, собранный на стороне репозитория.
-
-    Хранятся не сами имена, а укороченные отпечатки: развернуть их обратно
-    в список сайтов нельзя, а проверить принадлежность — можно.
-    """
+    """Список мошеннических доменов, собранный на стороне репозитория."""
 
     def __init__(self, blob):
         if not blob.startswith(DB_MAGIC):
@@ -1247,12 +1240,11 @@ class DomainDatabase:
         return False
 
     def is_popular(self, host):
-        """Сайт из первой полусотни тысяч по посещаемости."""
+        """Известный посещаемый сайт."""
         return self._contains("WHIT", host)
 
     def chain(self, host):
-        """Сам домен и его родители, но не выше площадки общего хостинга:
-        иначе один мошеннический поддомен закрыл бы сервис целиком."""
+        """Имена, которые нужно проверить для этого адреса."""
         parts = host.split(".")
         result = []
         for i in range(len(parts) - 1):
@@ -1771,8 +1763,7 @@ class LinkGuardPlugin(BasePlugin):
         self._run_background(lambda: self._refresh_database(manual=True))
 
     def _sync_database_mode(self):
-        """Селектор не умеет сообщать о смене значения, поэтому сверяем
-        выбранный режим с уже applied при каждой отрисовке настроек."""
+        """Сверяет выбранный объём базы с уже загруженным."""
         mode = self._database_mode()
         try:
             applied = int(self.get_setting("db_mode_applied", 1) or 0)
