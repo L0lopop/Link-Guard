@@ -8,7 +8,9 @@ Android-модули плагина подменяются заглушками,
 """
 
 import os
+import struct
 import sys
+import tempfile
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1029,6 +1031,104 @@ plugin._sources.clear()
 plugin._index_source(fake_message, fake_message.message)
 check("источник запомнен для ссылки из сообщения",
       plugin._sources.get("https://kanal.example/promo") == "unknown", plugin._sources)
+
+print("\nБаза мошеннических доменов")
+# Базу собираем тем же кодом, что работает в Actions: если сборщик и
+# читалка разойдутся в формате, тест это поймает.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "scripts"))
+import build_db
+
+BAD = ["moshennik.top", "sber-oplata.xyz", "phish.pages.dev"]
+GOOD = ["primer-horoshiy-sayt-s-dlinnym-imenem.top"]
+
+
+def make_database(bad=BAD, good=GOOD, platforms=("pages.dev",)):
+    malw, _ = build_db.hash_section(bad, build_db.CORE_BITS)
+    whit, _ = build_db.hash_section(good, build_db.WHITE_BITS)
+    sections = [
+        ("MALW", malw),
+        ("WHIT", whit),
+        ("BRND", b"example.com"),
+        ("TLDR", b"top 100"),
+        ("PLAT", "\n".join(platforms).encode("utf-8")),
+    ]
+    body = b"".join(build_db.section(tag, payload) for tag, payload in sections)
+    return b"LGDB" + struct.pack(">BIB", 1, 20400, len(sections)) + body
+
+
+blob = make_database()
+database = lg.DomainDatabase(blob)
+lg.install_database(database)
+
+check("база разобрана", database.total == len(BAD), database.total)
+check("платформы прочитаны", "pages.dev" in database.platforms, database.platforms)
+
+v = lg.analyze("https://moshennik.top/vhod")
+check("домен из базы — высокий риск", v.risk == lg.HIGH, v.flags)
+check("в разборе сказано про базу",
+      any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://lk.moshennik.top/vhod")
+check("поддомен мошеннического тоже опасен", v.risk == lg.HIGH, v.flags)
+check("в разборе назван родительский домен",
+      any("moshennik.top" in text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://phish.pages.dev/")
+check("конкретный поддомен платформы опасен", v.risk == lg.HIGH, v.flags)
+v = lg.analyze("https://drugoy-sayt.pages.dev/")
+check("платформа целиком не блокируется",
+      not any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://primer-horoshiy-sayt-s-dlinnym-imenem.top/")
+check("у посещаемого сайта мелкие придирки сняты", v.risk == lg.INFO, v.flags)
+
+lg.install_database(None)
+v = lg.analyze("https://moshennik.top/vhod")
+check("без базы проверка по ней не идёт",
+      not any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
+
+print("\nБаза: порченые файлы")
+for broken, title in (
+    (b"", "пустой файл"),
+    (b"NOPE" + blob[4:], "чужая подпись"),
+    (b"LGDB" + struct.pack(">BIB", 77, 20400, 0), "чужая версия"),
+    (blob[:len(blob) // 2], "обрезанный файл"),
+):
+    try:
+        lg.DomainDatabase(broken)
+        ok = False
+    except Exception:
+        ok = True
+    check("%s отвергается" % title, ok)
+
+with tempfile.NamedTemporaryFile(suffix=".lgdb", delete=False) as handle:
+    handle.write(b"musor, ne nasha baza")
+    junk_path = handle.name
+check("испорченный файл с диска не ломает плагин",
+      lg.read_database(junk_path) is None)
+check("несуществующий файл не ломает плагин",
+      lg.read_database(os.path.join(tempfile.gettempdir(), "net-takogo.lgdb")) is None)
+os.unlink(junk_path)
+
+with tempfile.NamedTemporaryFile(suffix=".lgdb", delete=False) as handle:
+    handle.write(blob)
+    good_path = handle.name
+restored = lg.read_database(good_path)
+check("целая база с диска читается", restored is not None and restored.total == len(BAD))
+os.unlink(good_path)
+
+print("\nБаза: настройки")
+db_plugin = lg.LinkGuardPlugin()
+db_plugin.on_plugin_load()
+db_plugin.set_setting("db_mode", 0)
+check("режим «выключена» читается", db_plugin._database_mode() == 0)
+db_plugin._load_database()
+check("при выключенной базе она не подставляется", lg.active_database() is None)
+db_plugin.set_setting("db_mode", 2)
+check("режим «полная» читается", db_plugin._database_mode() == 2)
+check("состояние базы описано словами",
+      isinstance(db_plugin._database_status(), str) and db_plugin._database_status())
 
 print("\nСовместимость со старым SDK")
 try:

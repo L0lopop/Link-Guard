@@ -47,6 +47,10 @@ WHITE_BITS = 36
 MIN_FEEDS = 3
 MIN_CORE = 50000
 
+# Сколько мошеннических поддоменов на посещаемом домене ещё считается
+# ошибкой фида, а не признаком площадки с самообслуживанием.
+POPULAR_SUBDOMAIN_LIMIT = 20
+
 # Через сколько записей начинается новый блок и сколько весит одна
 # строка указателя: значение (8 байт) и смещение в данных (4 байта).
 BLOCK_SIZE = 256
@@ -253,6 +257,44 @@ def find_platforms(hosts, rules, wildcards):
     return platforms
 
 
+def registrable(host, rules, wildcards):
+    """Домен, который кто-то зарегистрировал, с оглядкой на co.uk и vercel.app."""
+    parts = host.split(".")
+    for i in range(1, len(parts)):
+        candidate = ".".join(parts[i:])
+        parent = ".".join(parts[i + 1:])
+        if candidate in rules or (parent and parent in wildcards):
+            return ".".join(parts[i - 1:])
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def clear_popular_subdomains(membership, protected, rules, wildcards):
+    """Разбирается с поддоменами известных сайтов.
+
+    На посещаемом домене мошеннические поддомены встречаются по двум
+    причинам: либо фид ошибся, либо это площадка, раздающая всем желающим
+    адреса вида имя.площадка. Отличить одно от другого можно по счёту:
+    у docs.google.com соседей единицы, у weebly.com — тысячи. Первых
+    снимаем целиком, вторых объявляем площадкой, чтобы проверка
+    останавливалась на поддомене и не трогала сервис целиком.
+    """
+    groups = defaultdict(list)
+    for host in membership:
+        groups[registrable(host, rules, wildcards)].append(host)
+
+    dropped, platforms = [], set()
+    for parent, members in groups.items():
+        if parent not in protected:
+            continue
+        if len(members) <= POPULAR_SUBDOMAIN_LIMIT:
+            dropped.extend(members)
+        else:
+            platforms.add(parent)
+    for host in dropped:
+        del membership[host]
+    return dropped, platforms
+
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     started = datetime.now(timezone.utc)
@@ -286,6 +328,12 @@ def main():
     log("  снято по белому списку: %d (например: %s)" % (
         len(removed), ", ".join(removed[:5])))
 
+    dropped, busy = clear_popular_subdomains(membership, protected, rules, wildcards)
+    log("  снято поддоменов известных сайтов: %d (например: %s)" % (
+        len(dropped), ", ".join(sorted(dropped)[:5])))
+    log("  площадок с самообслуживанием: %d (например: %s)" % (
+        len(busy), ", ".join(sorted(busy)[:5])))
+
     malicious = list(membership)
     log("== итог: %d уникальных вредоносных хостов ==" % len(malicious))
 
@@ -303,7 +351,7 @@ def main():
     tld_counts = Counter(h.rsplit(".", 1)[-1] for h in malicious)
     tld_lines = ["%s %d" % (tld, count) for tld, count in tld_counts.most_common(400)]
 
-    platforms = find_platforms(malicious, rules, wildcards)
+    platforms = find_platforms(malicious, rules, wildcards) | busy
     log("  платформ общего хостинга: %d" % len(platforms))
 
     brands = popular[:BRAND_TOP]
@@ -331,6 +379,7 @@ def main():
         "brands": len(brands),
         "platforms": len(platforms),
         "removed_by_whitelist": len(removed),
+        "removed_popular_subdomains": len(dropped),
     })
     with open(os.path.join(OUT_DIR, "manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)

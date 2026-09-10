@@ -213,6 +213,24 @@ def main():
                  if full.is_malicious("proverka-%d-net.example" % i))
     check(misses == 0, "ложных срабатываний на 20000 выдуманных: %d" % misses)
 
+    print("== выборка посещаемых сайтов не тревожит ==")
+    # Список брендов в базе — это первая тысяча по посещаемости.
+    # Ни один из них не должен считаться мошенническим.
+    alarms = [host for host in full.brands if full.verdict(host) != "popular"]
+    check(not alarms, "тревог на тысяче посещаемых сайтов: %d %s" % (
+        len(alarms), alarms[:5]))
+
+    # То же для типичных адресов, какие присылают в переписке.
+    everyday = [
+        "youtube.com/watch", "t.me/durov", "github.com/torvalds/linux",
+        "ru.wikipedia.org/wiki/Кот", "market.yandex.ru", "avito.ru/moskva",
+        "ozon.ru/product/123", "wildberries.ru/catalog", "vk.com/feed",
+        "mail.google.com", "docs.google.com/document", "web.telegram.org",
+        "habr.com/ru/articles", "stackoverflow.com/questions", "dzen.ru",
+    ]
+    noisy = [u for u in everyday if full.verdict(u.split("/")[0]) == "malicious"]
+    check(not noisy, "тревог на обычных адресах: %s" % noisy)
+
     print("== скорость ==")
     probes = ["proverka-%d.example.com" % i for i in range(3000)]
     started = time.time()

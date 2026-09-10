@@ -2,12 +2,14 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
+import hashlib
 import os
 import re
+import struct
 import threading
 import time
 import unicodedata
@@ -211,6 +213,8 @@ STRINGS = {
         "unit_char": "символ|символа|символов",
         "f_badport": "После двоеточия стоит не номер порта — адрес сломан или замаскирован",
         "f_port": "Нестандартный порт %s",
+        "f_blocklist": "Сайт числится в списках мошеннических",
+        "f_blocklist_parent": "Домен %s числится в списках мошеннических",
         "f_tld": "Доменная зона .%s часто используется для одноразовых мошеннических сайтов",
         "f_deep": "Очень длинная цепочка поддоменов",
         "f_long": "Неестественно длинный домен",
@@ -230,6 +234,21 @@ STRINGS = {
         "rules_sub": "Нажмите, чтобы обновить сейчас",
         "rules_updated": "Списки обновлены: версия %s",
         "rules_none": "Списки не обновились",
+        "db_title": "База мошеннических сайтов",
+        "db_mode": "Объём базы",
+        "db_mode_off": "Выключена",
+        "db_mode_core": "Ядро — 1,4 МБ",
+        "db_mode_full": "Полная — 8,3 МБ",
+        "db_mode_hint": "Ядро содержит сайты, которые притворяются известными "
+                        "сервисами. Полная добавляет остальные, но качается дольше "
+                        "и занимает больше места.",
+        "db_refresh": "Обновить базу",
+        "db_updated": "База обновлена: %s записей",
+        "db_failed": "База не обновилась",
+        "db_off": "База выключена в настройках",
+        "db_status": "В базе %s записей, обновлена %s %s назад",
+        "db_status_none": "База ещё не скачана",
+        "db_status_off": "База выключена",
         "scripts_LATIN": "латиница",
         "scripts_CYRILLIC": "кириллица",
         "scripts_GREEK": "греческий",
@@ -339,6 +358,8 @@ STRINGS = {
         "unit_char": "character|characters|characters",
         "f_badport": "What follows the colon is not a port number — the address is broken or disguised",
         "f_port": "Non-standard port %s",
+        "f_blocklist": "The site is listed in scam databases",
+        "f_blocklist_parent": "The domain %s is listed in scam databases",
         "f_tld": "The .%s zone is often used for throwaway scam sites",
         "f_deep": "A very long chain of subdomains",
         "f_long": "Unnaturally long domain",
@@ -358,6 +379,21 @@ STRINGS = {
         "rules_sub": "Tap to update now",
         "rules_updated": "Lists updated: version %s",
         "rules_none": "Lists were not updated",
+        "db_title": "Scam site database",
+        "db_mode": "Database size",
+        "db_mode_off": "Off",
+        "db_mode_core": "Core — 1.4 MB",
+        "db_mode_full": "Full — 8.3 MB",
+        "db_mode_hint": "The core holds sites impersonating well-known services. "
+                        "The full one adds the rest but takes longer to download "
+                        "and more space.",
+        "db_refresh": "Update database",
+        "db_updated": "Database updated: %s entries",
+        "db_failed": "The database was not updated",
+        "db_off": "The database is switched off in settings",
+        "db_status": "%s entries, updated %s %s ago",
+        "db_status_none": "The database has not been downloaded yet",
+        "db_status_off": "The database is off",
         "scripts_LATIN": "Latin",
         "scripts_CYRILLIC": "Cyrillic",
         "scripts_GREEK": "Greek",
@@ -925,6 +961,23 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         verdict.cleaned, verdict.removed_params = clean_url(url, aggressive)
         return verdict
 
+    # Готовая база перевешивает догадки: если сайт в ней есть — это не
+    # подозрение, а факт. Если он, наоборот, из числа посещаемых, мелкие
+    # придирки к зоне и длине адреса только мешают.
+    known_good = False
+    database = active_database()
+    if database is not None:
+        try:
+            hit = database.malicious_hit(host)
+            if hit == host:
+                verdict.add(HIGH, phrase("f_blocklist"))
+            elif hit:
+                verdict.add(HIGH, phrase("f_blocklist_parent", hit))
+            else:
+                known_good = database.is_popular(host) or database.is_popular(reg)
+        except Exception as e:
+            log("LinkGuard: db lookup failed: %s" % e)
+
     if parts.username or "@" in parts.netloc:
         verdict.add(HIGH, phrase("f_userinfo", host))
 
@@ -975,17 +1028,18 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         verdict.add(LOW, phrase("f_port", port))
 
     tld = host.rsplit(".", 1)[-1]
-    if tld in RISKY_TLD:
+    if tld in RISKY_TLD and not known_good:
         verdict.add(LOW, phrase("f_tld", tld))
 
-    if host.count(".") >= 4:
-        verdict.add(LOW, phrase("f_deep"))
-    if len(host) > 40:
-        verdict.add(LOW, phrase("f_long"))
+    if not known_good:
+        if host.count(".") >= 4:
+            verdict.add(LOW, phrase("f_deep"))
+        if len(host) > 40:
+            verdict.add(LOW, phrase("f_long"))
 
     lowered = (host + parts.path).lower()
     hits = [w for w in BAIT_WORDS if w in lowered]
-    if hits:
+    if hits and not known_good:
         level = MEDIUM if verdict.flags else LOW
         verdict.add(level, phrase("f_bait", ", ".join(hits[:3])))
 
@@ -1095,6 +1149,176 @@ def fetch_rules(timeout=10):
         return None
 
 
+DB_BASE_URL = "https://github.com/L0lopop/Link-Guard/releases/download/feeds/"
+DB_CORE_NAME = "core.lgdb"
+DB_FULL_NAME = "full.lgdb"
+DB_INTERVAL = 24 * 60 * 60
+DB_MAX_BYTES = 24 * 1024 * 1024
+DB_MAGIC = b"LGDB"
+DB_FORMAT = 1
+DB_HEADER = 10
+DB_INDEX_ENTRY = 12
+
+
+class DomainDatabase:
+    """Список мошеннических доменов, собранный на стороне репозитория.
+
+    Хранятся не сами имена, а укороченные отпечатки: развернуть их обратно
+    в список сайтов нельзя, а проверить принадлежность — можно.
+    """
+
+    def __init__(self, blob):
+        if not blob.startswith(DB_MAGIC):
+            raise ValueError("чужой файл")
+        version, self.built_day, count = struct.unpack(">BIB", blob[4:DB_HEADER])
+        if version != DB_FORMAT:
+            raise ValueError("версия формата %d" % version)
+        self.sections = {}
+        offset = DB_HEADER
+        for _ in range(count):
+            tag = blob[offset:offset + 4].decode("ascii")
+            length = struct.unpack(">I", blob[offset + 4:offset + 8])[0]
+            self.sections[tag] = blob[offset + 8:offset + 8 + length]
+            offset += 8 + length
+        if "MALW" not in self.sections:
+            raise ValueError("нет раздела с доменами")
+        self.platforms = self._lines("PLAT")
+        self.brands = self._lines("BRND")
+        self.total = struct.unpack(">I", self.sections["MALW"][1:5])[0]
+
+    def _lines(self, tag):
+        raw = self.sections.get(tag)
+        if not raw:
+            return set()
+        return set(raw.decode("utf-8", "ignore").split(LINE_BREAK))
+
+    @property
+    def age_days(self):
+        return max(0, int(time.time() // 86400) - self.built_day)
+
+    def _contains(self, tag, host):
+        raw = self.sections.get(tag)
+        if not raw:
+            return False
+        bits, count, block, index_count = struct.unpack(">BIHI", raw[:11])
+        if not count or not index_count:
+            return False
+        digest = hashlib.sha256(host.encode("utf-8")).digest()[:8]
+        key = int.from_bytes(digest, "big") >> (64 - bits)
+
+        index_at = 11
+        data_at = index_at + index_count * DB_INDEX_ENTRY
+
+        low, high = 0, index_count
+        while low < high:
+            middle = (low + high) // 2
+            spot = index_at + middle * DB_INDEX_ENTRY
+            if struct.unpack(">Q", raw[spot:spot + 8])[0] <= key:
+                low = middle + 1
+            else:
+                high = middle
+        if low == 0:
+            return False
+
+        spot = index_at + (low - 1) * DB_INDEX_ENTRY
+        value, start = struct.unpack(">QI", raw[spot:spot + DB_INDEX_ENTRY])
+        if value == key:
+            return True
+
+        position = data_at + start
+        limit = len(raw)
+        seen = 0
+        while seen < block and position < limit:
+            shift, delta = 0, 0
+            while position < limit:
+                byte = raw[position]
+                position += 1
+                delta |= (byte & 0x7F) << shift
+                if not byte & 0x80:
+                    break
+                shift += 7
+            if seen:
+                value += delta
+                if value == key:
+                    return True
+                if value > key:
+                    return False
+            seen += 1
+        return False
+
+    def is_popular(self, host):
+        """Сайт из первой полусотни тысяч по посещаемости."""
+        return self._contains("WHIT", host)
+
+    def chain(self, host):
+        """Сам домен и его родители, но не выше площадки общего хостинга:
+        иначе один мошеннический поддомен закрыл бы сервис целиком."""
+        parts = host.split(".")
+        result = []
+        for i in range(len(parts) - 1):
+            candidate = ".".join(parts[i:])
+            result.append(candidate)
+            if candidate in self.platforms:
+                break
+        return result
+
+    def malicious_hit(self, host):
+        """Возвращает совпавшее имя или None."""
+        for candidate in self.chain(host):
+            if self._contains("MALW", candidate):
+                return candidate
+        return None
+
+
+_database = None
+_database_lock = threading.Lock()
+
+
+def active_database():
+    return _database
+
+
+def install_database(database):
+    global _database
+    with _database_lock:
+        _database = database
+
+
+def read_database(path):
+    """Читает файл базы с диска. None, если файла нет или он испорчен."""
+    try:
+        if not path or not os.path.exists(path):
+            return None
+        size = os.path.getsize(path)
+        if size < DB_HEADER or size > DB_MAX_BYTES:
+            log("LinkGuard: db size %d rejected" % size)
+            return None
+        with open(path, "rb") as handle:
+            return DomainDatabase(handle.read())
+    except Exception as e:
+        log("LinkGuard: db read failed: %s" % e)
+        return None
+
+
+def fetch_database(name, timeout=90):
+    """Скачивает файл базы. Возвращает содержимое или None."""
+    try:
+        import requests
+        resp = requests.get(DB_BASE_URL + name, timeout=timeout,
+                            headers={"User-Agent": "LinkGuard/%s" % __version__})
+        if resp.status_code != 200:
+            log("LinkGuard: db fetch HTTP %s" % resp.status_code)
+            return None
+        content = resp.content
+        if len(content) > DB_MAX_BYTES or not content.startswith(DB_MAGIC):
+            log("LinkGuard: db fetch rejected, %d bytes" % len(content))
+            return None
+        return content
+    except Exception as e:
+        log("LinkGuard: db fetch failed: %s" % e)
+        return None
+
+
 def domain_age_days(domain, timeout=8):
     """Возраст домена в днях по данным RDAP. None — узнать не удалось."""
     try:
@@ -1195,6 +1419,7 @@ class LinkGuardPlugin(BasePlugin):
         self._ages = {}
 
         self._step("rules", self._load_rules)
+        self._step("database", self._load_database)
         self._step("openUrl", self._install_open_url_hook)
         self._step("updates", self._install_update_hook)
         self._step("sendHook", self.add_on_send_message_hook)
@@ -1240,6 +1465,7 @@ class LinkGuardPlugin(BasePlugin):
     def create_settings(self):
         if not HAS_SETTINGS:
             return []
+        self._sync_database_mode()
         return [
             Header(text=phrase("hdr_checks")),
             Switch(key="check_enabled", text=phrase("sw_check"), default=True,
@@ -1267,6 +1493,13 @@ class LinkGuardPlugin(BasePlugin):
 
             Switch(key="check_age", text=phrase("sw_age"), default=False,
                    subtext=phrase("sw_age_sub")),
+
+            Header(text=phrase("db_title")),
+            Selector(key="db_mode", text=phrase("db_mode"), default=1,
+                     items=[phrase("db_mode_off"), phrase("db_mode_core"),
+                            phrase("db_mode_full")]),
+            Text(text=phrase("db_refresh"), subtext=self._database_status(),
+                 on_click=self._on_refresh_database_click),
 
             Header(text=phrase("hdr_updates")),
             Switch(key="check_updates", text=phrase("sw_updates"), default=True,
@@ -1464,6 +1697,104 @@ class LinkGuardPlugin(BasePlugin):
     def _on_refresh_rules_click(self, *args):
         self._toast(phrase("toast_checking"))
         self._run_background(lambda: self._refresh_rules(manual=True))
+
+    def _database_mode(self):
+        """0 — база выключена, 1 — ядро, 2 — полная."""
+        try:
+            return int(self.get_setting("db_mode", 1) or 0)
+        except (TypeError, ValueError):
+            return 1
+
+    def _database_path(self):
+        folders = self._writable_dirs()
+        return os.path.join(folders[0], "link_guard_domains.lgdb") if folders else None
+
+    def _load_database(self):
+        """База с диска, затем при необходимости обновление из репозитория."""
+        if not self._database_mode():
+            install_database(None)
+            return
+        path = self._database_path()
+        database = read_database(path)
+        if database is not None:
+            install_database(database)
+            self._debug("db: с диска, %d записей, возраст %d дн." % (
+                database.total, database.age_days))
+        try:
+            last = float(self.get_setting("db_checked_at", 0) or 0)
+        except (TypeError, ValueError):
+            last = 0
+        stale = database is None or database.age_days >= 1
+        if stale and time.time() - last >= DB_INTERVAL:
+            self._run_background(lambda: self._refresh_database(manual=False))
+
+    def _refresh_database(self, manual=False):
+        """Скачивает базу, сохраняет на диск и подставляет её взамен старой."""
+        mode = self._database_mode()
+        if not mode:
+            return
+        name = DB_FULL_NAME if mode == 2 else DB_CORE_NAME
+        content = fetch_database(name)
+        self.set_setting("db_checked_at", time.time())
+        if not content:
+            if manual:
+                run_on_ui_thread(lambda: self._toast(phrase("db_failed")))
+            return
+        try:
+            database = DomainDatabase(content)
+        except Exception as e:
+            self._debug("db: файл не разобран: %s" % e)
+            if manual:
+                run_on_ui_thread(lambda: self._toast(phrase("db_failed")))
+            return
+
+        install_database(database)
+        if getattr(self, "_cache", None) is not None:
+            self._cache.clear()
+        path = self._database_path()
+        if path:
+            try:
+                with open(path, "wb") as handle:
+                    handle.write(content)
+            except Exception as e:
+                self._debug("db: не сохранилась: %s" % e)
+        total = database.total
+        self._debug("db: из сети, %s, %d записей" % (name, total))
+        if manual:
+            run_on_ui_thread(lambda: self._toast(phrase("db_updated", total)))
+
+    def _on_refresh_database_click(self, *args):
+        if not self._database_mode():
+            self._toast(phrase("db_off"))
+            return
+        self._toast(phrase("toast_checking"))
+        self._run_background(lambda: self._refresh_database(manual=True))
+
+    def _sync_database_mode(self):
+        """Селектор не умеет сообщать о смене значения, поэтому сверяем
+        выбранный режим с уже applied при каждой отрисовке настроек."""
+        mode = self._database_mode()
+        try:
+            applied = int(self.get_setting("db_mode_applied", 1) or 0)
+        except (TypeError, ValueError):
+            applied = 1
+        if mode == applied:
+            return
+        self.set_setting("db_mode_applied", mode)
+        install_database(None)
+        if getattr(self, "_cache", None) is not None:
+            self._cache.clear()
+        if mode:
+            self._run_background(lambda: self._refresh_database(manual=True))
+
+    def _database_status(self):
+        database = active_database()
+        if not self._database_mode():
+            return phrase("db_status_off")
+        if database is None:
+            return phrase("db_status_none")
+        return phrase("db_status", database.total, database.age_days,
+                      plural_form(phrase("unit_day"), database.age_days))
 
     def _maybe_check_updates(self):
         if not self.get_setting("check_updates", True):
