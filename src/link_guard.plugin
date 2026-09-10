@@ -1898,7 +1898,8 @@ class LinkGuardPlugin(BasePlugin):
         else:
             worth_showing = bool(verdict.flags)
 
-        wants_age = ask_age and verdict.host and bool(verdict.flags)
+        wants_age = (ask_age and bool(verdict.flags)
+                     and DOMAIN_RE.fullmatch(registrable(verdict.host or "")) is not None)
         needs_dialog = (worth_showing or (verdict.is_shortener and expand_short)
                         or wants_age) and self._can_dialog()
 
