@@ -871,14 +871,14 @@ class LinkGuardPlugin(BasePlugin):
         self._stats = {}
         self._sources = {}
         self._ages = {}
-        self._load_rules()
 
-        self._install_open_url_hook()
-        self._install_update_hook()
-        self.add_on_send_message_hook()
+        self._step("rules", self._load_rules)
+        self._step("openUrl", self._install_open_url_hook)
+        self._step("updates", self._install_update_hook)
+        self._step("sendHook", self.add_on_send_message_hook)
 
         if HAS_MENU:
-            self._register_menu()
+            self._step("menu", self._register_menu)
         else:
             log("LinkGuard: меню сообщений недоступно в этом SDK")
         self._maybe_check_updates()
@@ -1079,6 +1079,16 @@ class LinkGuardPlugin(BasePlugin):
         self.set_setting("stats_cleaned", 0)
         self.set_setting("stats_warned", 0, reload_settings=True)
         self._toast(t("stats_done"))
+
+    def _step(self, name, action):
+        try:
+            action()
+            self._debug("load: %s ok" % name)
+            return True
+        except Exception as e:
+            log("LinkGuard: load step %s failed: %s" % (name, e))
+            self._debug("load: %s упал — %s" % (name, e))
+            return False
 
     def _rules_path(self):
         folders = self._writable_dirs()
