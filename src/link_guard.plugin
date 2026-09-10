@@ -2,7 +2,7 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
@@ -189,6 +189,18 @@ STRINGS = {
         "f_exec": "Ссылка ведёт на файл %s — это установка программы, а не сайт",
         "f_short": "Сокращённая ссылка — настоящий адрес скрыт",
         "f_hops": "Редиректов по пути: %s",
+        "f_age_new": "Домену всего %s дней — свежая регистрация",
+        "f_age_young": "Домен зарегистрирован %s дней назад",
+        "src_stranger": "Ссылка из чужого чата или канала",
+        "src_trusted": "Ссылка от вашего контакта",
+        "sw_age": "Узнавать возраст домена",
+        "sw_age_sub": "Для подозрительных ссылок спрашивает дату регистрации у rdap.org — домен уходит на сторонний сервис",
+        "sw_rules": "Пополнять списки из репозитория",
+        "sw_rules_sub": "Раз в сутки подтягивает новые бренды и трекеры. Правила только добавляют проверки",
+        "rules_line": "Списки правил: версия %s",
+        "rules_sub": "Нажмите, чтобы обновить сейчас",
+        "rules_updated": "Списки обновлены: версия %s",
+        "rules_none": "Списки не обновились",
         "scripts_LATIN": "латиница",
         "scripts_CYRILLIC": "кириллица",
         "scripts_GREEK": "греческий",
@@ -298,6 +310,18 @@ STRINGS = {
         "f_exec": "The link points to a %s file — that installs software, it is not a website",
         "f_short": "Shortened link — the real address is hidden",
         "f_hops": "Redirects along the way: %s",
+        "f_age_new": "The domain is only %s days old",
+        "f_age_young": "The domain was registered %s days ago",
+        "src_stranger": "The link comes from a stranger or a channel",
+        "src_trusted": "The link comes from your contact",
+        "sw_age": "Look up domain age",
+        "sw_age_sub": "Asks rdap.org for the registration date of suspicious domains — the domain leaves your device",
+        "sw_rules": "Update lists from the repository",
+        "sw_rules_sub": "Pulls new brands and trackers once a day. Rules can only add checks",
+        "rules_line": "Rule lists: version %s",
+        "rules_sub": "Tap to update now",
+        "rules_updated": "Lists updated: version %s",
+        "rules_none": "Lists were not updated",
         "scripts_LATIN": "Latin",
         "scripts_CYRILLIC": "Cyrillic",
         "scripts_GREEK": "Greek",
@@ -412,6 +436,8 @@ class Verdict:
         self.is_shortener = False
         self.host = ""
         self.display_host = ""
+        self.source = None
+        self.age_days = None
 
     def add(self, level, text):
         self.flags.append((level, text))
@@ -425,6 +451,8 @@ class Verdict:
         c.is_shortener = self.is_shortener
         c.host = self.host
         c.display_host = self.display_host
+        c.source = self.source
+        c.age_days = self.age_days
         return c
 
     @property
@@ -663,6 +691,109 @@ REPO_URL = "https://github.com/L0lopop/Link-Guard"
 UPDATE_URL = "https://raw.githubusercontent.com/L0lopop/Link-Guard/main/update.json"
 UPDATE_INTERVAL = 24 * 60 * 60
 
+RULES_URL = "https://raw.githubusercontent.com/L0lopop/Link-Guard/main/rules.json"
+RULES_INTERVAL = 24 * 60 * 60
+RULES_MAX_ITEMS = 2000
+RULES_MAX_LEN = 80
+RULES_VERSION = 0
+
+RDAP_URL = "https://rdap.org/domain/%s"
+AGE_ALARM_DAYS = 30
+AGE_NOTE_DAYS = 120
+AGE_CACHE_MAX = 200
+AGE_CACHE_TTL = 7 * 24 * 60 * 60
+
+
+def sanitize_rules_list(value):
+    if not isinstance(value, (list, tuple)):
+        return []
+    clean = []
+    for item in list(value)[:RULES_MAX_ITEMS]:
+        if not isinstance(item, str):
+            continue
+        text = item.strip().lower()
+        if text and len(text) <= RULES_MAX_LEN and " " not in text:
+            clean.append(text)
+    return clean
+
+
+def apply_rules(data):
+    global TRACKER_PREFIXES, BAIT_WORDS, RULES_VERSION
+    if not isinstance(data, dict):
+        return 0
+
+    added = 0
+    for key, target in (("brands", BRANDS), ("trackers", TRACKER_EXACT),
+                        ("shorteners", SHORTENERS), ("risky_tld", RISKY_TLD),
+                        ("generic_labels", GENERIC_LABELS)):
+        for item in sanitize_rules_list(data.get(key)):
+            if item not in target:
+                target.add(item)
+                added += 1
+
+    fresh = [p for p in sanitize_rules_list(data.get("tracker_prefixes"))
+             if p not in TRACKER_PREFIXES]
+    if fresh:
+        TRACKER_PREFIXES = tuple(TRACKER_PREFIXES) + tuple(fresh)
+        added += len(fresh)
+
+    fresh = [b for b in sanitize_rules_list(data.get("bait")) if b not in BAIT_WORDS]
+    if fresh:
+        BAIT_WORDS = tuple(BAIT_WORDS) + tuple(fresh)
+        added += len(fresh)
+
+    try:
+        RULES_VERSION = int(data.get("version", 0) or 0)
+    except (TypeError, ValueError):
+        RULES_VERSION = 0
+    return added
+
+
+def add_age_flag(verdict, days):
+    if days is None:
+        return
+    verdict.age_days = days
+    if days <= AGE_ALARM_DAYS:
+        verdict.add(HIGH if verdict.flags else MEDIUM, t("f_age_new", days))
+    elif days <= AGE_NOTE_DAYS:
+        verdict.add(LOW, t("f_age_young", days))
+
+
+def fetch_rules(timeout=10):
+    try:
+        import requests
+        resp = requests.get(RULES_URL, timeout=timeout,
+                            params={"ts": int(time.time())},
+                            headers={"User-Agent": "LinkGuard/%s" % __version__,
+                                     "Cache-Control": "no-cache"})
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        log("LinkGuard: rules fetch failed: %s" % e)
+        return None
+
+
+def domain_age_days(domain, timeout=8):
+    try:
+        import datetime
+        import requests
+        resp = requests.get(RDAP_URL % domain, timeout=timeout,
+                            headers={"User-Agent": "LinkGuard/%s" % __version__,
+                                     "Accept": "application/rdap+json"})
+        if resp.status_code != 200:
+            return None
+        for event in resp.json().get("events", []) or []:
+            if str(event.get("eventAction", "")).lower() != "registration":
+                continue
+            stamp = str(event.get("eventDate", ""))[:10]
+            born = datetime.date(int(stamp[0:4]), int(stamp[5:7]), int(stamp[8:10]))
+            return (datetime.date.today() - born).days
+    except Exception as e:
+        log("LinkGuard: rdap failed: %s" % e)
+    return None
+
 
 def parse_version(text):
     parts = []
@@ -738,6 +869,9 @@ class LinkGuardPlugin(BasePlugin):
         self._progress = None
         self._counted = {}
         self._stats = {}
+        self._sources = {}
+        self._ages = {}
+        self._load_rules()
 
         self._install_open_url_hook()
         self._install_update_hook()
@@ -809,9 +943,16 @@ class LinkGuardPlugin(BasePlugin):
                  on_click=self._on_reset_stats_click),
             Text(text=t("tags_title"), subtext=t("read_more"), on_click=self._on_tags_note),
 
+            Switch(key="check_age", text=t("sw_age"), default=False,
+                   subtext=t("sw_age_sub")),
+
             Header(text=t("hdr_updates")),
             Switch(key="check_updates", text=t("sw_updates"), default=True,
                    subtext=t("sw_updates_sub")),
+            Switch(key="use_rules", text=t("sw_rules"), default=True,
+                   subtext=t("sw_rules_sub")),
+            Text(text=t("rules_line", RULES_VERSION), subtext=t("rules_sub"),
+                 on_click=self._on_refresh_rules_click),
             Text(text=t("btn_check_now"), subtext=t("version_line", __version__),
                  accent=True, on_click=self._on_check_updates_click),
 
@@ -938,6 +1079,56 @@ class LinkGuardPlugin(BasePlugin):
         self.set_setting("stats_cleaned", 0)
         self.set_setting("stats_warned", 0, reload_settings=True)
         self._toast(t("stats_done"))
+
+    def _rules_path(self):
+        folders = self._writable_dirs()
+        return os.path.join(folders[0], "link_guard_rules.json") if folders else None
+
+    def _load_rules(self):
+        if not self.get_setting("use_rules", True):
+            return
+        path = self._rules_path()
+        if path and os.path.exists(path):
+            try:
+                import json
+                with open(path, "r", encoding="utf-8") as handle:
+                    added = apply_rules(json.load(handle))
+                self._debug("rules: с диска, версия %s, добавлено %s" % (RULES_VERSION, added))
+            except Exception as e:
+                self._debug("rules: файл не прочитан: %s" % e)
+        try:
+            last = float(self.get_setting("rules_checked_at", 0) or 0)
+        except (TypeError, ValueError):
+            last = 0
+        if time.time() - last >= RULES_INTERVAL:
+            self._run_background(lambda: self._refresh_rules(manual=False))
+
+    def _refresh_rules(self, manual=False):
+        data = fetch_rules()
+        self.set_setting("rules_checked_at", time.time())
+        if not data:
+            if manual:
+                run_on_ui_thread(lambda: self._toast(t("rules_none")))
+            return
+        added = apply_rules(data)
+        self._debug("rules: из сети, версия %s, добавлено %s" % (RULES_VERSION, added))
+        path = self._rules_path()
+        if path:
+            try:
+                import json
+                with open(path, "w", encoding="utf-8") as handle:
+                    json.dump(data, handle, ensure_ascii=False)
+            except Exception as e:
+                self._debug("rules: не сохранились: %s" % e)
+        if getattr(self, "_cache", None) is not None:
+            self._cache.clear()
+        version = RULES_VERSION
+        if manual:
+            run_on_ui_thread(lambda: self._toast(t("rules_updated", version)))
+
+    def _on_refresh_rules_click(self, *args):
+        self._toast(t("toast_checking"))
+        self._run_background(lambda: self._refresh_rules(manual=True))
 
     def _maybe_check_updates(self):
         if not self.get_setting("check_updates", True):
@@ -1200,11 +1391,67 @@ class LinkGuardPlugin(BasePlugin):
         try:
             message = getattr(update, "message", None)
             if message is not None:
-                self._index_anchors(getattr(message, "message", None),
-                                    getattr(message, "entities", None))
+                text = getattr(message, "message", None)
+                self._index_anchors(text, getattr(message, "entities", None))
+                self._index_source(message, text)
         except Exception:
             pass
         return HookResult()
+
+    @staticmethod
+    def _message_source(message):
+        try:
+            if getattr(message, "out", False):
+                return "trusted"
+            peer = getattr(message, "peer_id", None)
+            if peer is not None and int(getattr(peer, "channel_id", 0) or 0):
+                return "unknown"
+            from_id = getattr(message, "from_id", None)
+            user_id = 0
+            for holder in (from_id, peer):
+                if holder is None:
+                    continue
+                user_id = int(getattr(holder, "user_id", 0) or 0)
+                if user_id:
+                    break
+            if not user_id:
+                return "unknown"
+            controller = _grab("client_utils", "get_messages_controller")
+            if controller is None:
+                return None
+            user = controller().getUser(user_id)
+            if user is None:
+                return None
+            return "trusted" if getattr(user, "contact", False) else "unknown"
+        except Exception:
+            return None
+
+    def _index_source(self, message, text):
+        source = self._message_source(message)
+        if not source:
+            return
+        holder = getattr(self, "_sources", None)
+        if holder is None:
+            return
+        found = list(URL_RE.findall(str(text or "")))
+        found.extend(self._anchor_urls(message))
+        for url in found:
+            if len(holder) >= ANCHOR_MAX:
+                holder.clear()
+            holder[url] = source
+
+    @staticmethod
+    def _anchor_urls(message):
+        urls = []
+        try:
+            entities = getattr(message, "entities", None)
+            for i in range(entities.size()):
+                url = getattr(entities.get(i), "url", None)
+                if url:
+                    urls.append(str(url))
+        except Exception:
+            pass
+        return urls
 
     def _index_anchors(self, text, entities):
         if not text or entities is None:
@@ -1290,20 +1537,29 @@ class LinkGuardPlugin(BasePlugin):
             return
 
         verdict = self._cached_analyze(url, self._anchors.get(url))
+        verdict.source = self._sources.get(url)
         try:
             mode = int(self.get_setting("show_mode", 0) or 0)
         except (TypeError, ValueError):
             mode = 0
         expand_short = bool(self.get_setting("expand_short", True))
         clean_on_open = bool(self.get_setting("clean_on_open", True))
+        ask_age = bool(self.get_setting("check_age", False))
 
-        worth_showing = mode >= 1 or bool(verdict.flags)
+        if mode >= 1:
+            worth_showing = True
+        elif verdict.source == "trusted":
+            worth_showing = verdict.suspicious
+        else:
+            worth_showing = bool(verdict.flags)
 
-        needs_dialog = (worth_showing
-                        or (verdict.is_shortener and expand_short)) and self._can_dialog()
+        wants_age = ask_age and verdict.host and bool(verdict.flags)
+        needs_dialog = (worth_showing or (verdict.is_shortener and expand_short)
+                        or wants_age) and self._can_dialog()
 
-        self._debug("open %s risk=%s dialog=%s arg=%s"
-                    % (url, verdict.risk, needs_dialog, type(param.args[index]).__name__))
+        self._debug("open %s risk=%s source=%s dialog=%s arg=%s"
+                    % (url, verdict.risk, verdict.source, needs_dialog,
+                       type(param.args[index]).__name__))
 
         if not needs_dialog:
             if clean_on_open and verdict.cleaned != url:
@@ -1321,27 +1577,54 @@ class LinkGuardPlugin(BasePlugin):
         method = param.method
         args = list(param.args)
 
-        if verdict.is_shortener and expand_short:
-            self._expand_then_show(verdict, method, args, index)
+        unfold = verdict.is_shortener and expand_short
+        if unfold or wants_age:
+            self._enrich_then_show(verdict, method, args, index, unfold, wants_age)
         else:
             self._show_verdict(verdict, method, args, index)
 
-    def _expand_then_show(self, verdict, method, args, index):
+    def _enrich_then_show(self, verdict, method, args, index, unfold, wants_age):
         def worker():
-            try:
-                final, hops = expand(verdict.cleaned)
-                if final:
-                    verdict.final = final
-                    inner = analyze(final, self._aggressive(), self._whitelist())
-                    for level, text in inner.flags:
-                        verdict.add(level, text)
-                    if hops:
-                        verdict.add(INFO, t("f_hops", hops))
-            except Exception as e:
-                log("LinkGuard: expand worker failed: %s" % e)
+            if unfold:
+                try:
+                    final, hops = expand(verdict.cleaned)
+                    if final:
+                        verdict.final = final
+                        inner = analyze(final, self._aggressive(), self._whitelist())
+                        for level, text in inner.flags:
+                            verdict.add(level, text)
+                        if hops:
+                            verdict.add(INFO, t("f_hops", hops))
+                except Exception as e:
+                    log("LinkGuard: expand worker failed: %s" % e)
+            if wants_age:
+                try:
+                    target = verdict.final or verdict.cleaned
+                    host = (urlsplit(target).hostname or verdict.host or "").lower()
+                    add_age_flag(verdict, self._domain_age(registrable(host)))
+                except Exception as e:
+                    log("LinkGuard: age worker failed: %s" % e)
             run_on_ui_thread(lambda: self._finish_expanded(verdict, method, args, index))
 
         self._run_background(worker)
+
+    def _domain_age(self, domain):
+        if not domain:
+            return None
+        cache = getattr(self, "_ages", None)
+        if cache is None:
+            cache = self._ages = {}
+        now = time.time()
+        hit = cache.get(domain)
+        if hit and now - hit[0] < AGE_CACHE_TTL:
+            return hit[1]
+        days = domain_age_days(domain)
+        if days is not None:
+            if len(cache) >= AGE_CACHE_MAX:
+                cache.clear()
+            cache[domain] = (now, days)
+            self._debug("rdap: %s -> %s дней" % (domain, days))
+        return days
 
     def _finish_expanded(self, verdict, method, args, index):
         if self._can_dialog():
@@ -1370,6 +1653,10 @@ class LinkGuardPlugin(BasePlugin):
         if verdict.removed_params:
             lines.append(t("lbl_removed", len(verdict.removed_params),
                            ", ".join(verdict.removed_params[:4])))
+        if verdict.source == "unknown":
+            lines.append(t("src_stranger"))
+        elif verdict.source == "trusted":
+            lines.append(t("src_trusted"))
 
         marks = {HIGH: "⛔", MEDIUM: "⚠️", LOW: "•", INFO: "•"}
         problems = sorted(verdict.flags, key=lambda f: -_RISK_ORDER[f[0]])

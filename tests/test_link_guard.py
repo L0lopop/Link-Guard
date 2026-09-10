@@ -741,6 +741,102 @@ plugin._check_updates(manual=True)
 check("недоступный репозиторий не роняет плагин", True)
 lg.fetch_update_info = real_fetch
 
+print("\nПравила из репозитория")
+check("мусор в списки не попадает",
+      lg.sanitize_rules_list(["ok.example", 42, "", "с пробелом", "x" * 200]) == ["ok.example"],
+      lg.sanitize_rules_list(["ok.example", 42, "", "с пробелом", "x" * 200]))
+check("не список — пустой результат", lg.sanitize_rules_list("строка") == [])
+
+before_brands = len(lg.BRANDS)
+added = lg.apply_rules({"version": 7, "brands": ["novyibank.ru"],
+                        "trackers": ["newclid"], "bait": ["razblokirovka"],
+                        "tracker_prefixes": ["zz_"], "risky_tld": ["bogus"]})
+check("правила добавили записи", added >= 5, added)
+check("версия правил запомнена", lg.RULES_VERSION == 7, lg.RULES_VERSION)
+check("встроенные бренды не потерялись", len(lg.BRANDS) == before_brands + 1)
+check("новый бренд участвует в проверке",
+      lg.analyze("https://novyibank.ru.pay.top/enter").risk == lg.HIGH,
+      lg.analyze("https://novyibank.ru.pay.top/enter").flags)
+check("новый трекер вырезается",
+      lg.clean_url("https://shop.ru/x?newclid=1")[0] == "https://shop.ru/x",
+      lg.clean_url("https://shop.ru/x?newclid=1"))
+check("новый префикс вырезается",
+      lg.clean_url("https://shop.ru/x?zz_source=a")[0] == "https://shop.ru/x")
+
+check("битые правила ничего не ломают", lg.apply_rules("не словарь") == 0)
+check("после мусора списки целы", "novyibank.ru" in lg.BRANDS)
+
+import json as _json
+with open(os.path.join(ROOT, "rules.json"), encoding="utf-8") as fh:
+    shipped = _json.load(fh)
+check("rules.json в репозитории разбирается",
+      isinstance(shipped, dict) and shipped["version"] >= 1)
+check("в нём только списки и служебные поля",
+      all(isinstance(v, (list, int, str)) for v in shipped.values()), list(shipped))
+
+print("\nВозраст домена")
+v = lg.analyze("https://pay-now.top/enter")
+lg.add_age_flag(v, 3)
+check("свежий домен поднимает риск", v.risk == lg.HIGH, v.flags)
+check("возраст сохранён в вердикте", v.age_days == 3)
+v2 = lg.analyze("https://ozon.ru/product/1")
+lg.add_age_flag(v2, 60)
+check("домен постарше — лишь замечание", v2.risk == lg.LOW, v2.flags)
+v3 = lg.analyze("https://ozon.ru/product/2")
+lg.add_age_flag(v3, 4000)
+check("старый домен не тревожит", not v3.flags, v3.flags)
+v4 = lg.analyze("https://ozon.ru/product/3")
+lg.add_age_flag(v4, None)
+check("неизвестный возраст ничего не добавляет", not v4.flags)
+
+print("\nИсточник ссылки")
+if handler is not None:
+    plugin._cache.clear()
+    plugin.set_setting("show_mode", 0)
+    weak = "https://rasprodaja.xyz/sale"
+    check("у ссылки есть слабое замечание",
+          lg.analyze(weak).flags and not lg.analyze(weak).suspicious, lg.analyze(weak).flags)
+
+    plugin._sources[weak] = "trusted"
+    param = FakeParam(weak)
+    handler.before_hooked_method(param)
+    check("от контакта слабое замечание не тревожит", not param.cancelled)
+
+    plugin._sources[weak] = "unknown"
+    plugin._cache.clear()
+    param = FakeParam(weak)
+    handler.before_hooked_method(param)
+    check("из чужого чата — показываем разбор", param.cancelled)
+    check("в разборе сказано, откуда ссылка",
+          lg.t("src_stranger") in (FakeDialog.last.message or ""), FakeDialog.last.message)
+    FakeDialog.last.press("positive")
+
+    danger = "https://sberbank.ru@phish.top/login"
+    plugin._sources[danger] = "trusted"
+    plugin._cache.clear()
+    param = FakeParam(danger)
+    handler.before_hooked_method(param)
+    check("опасное тревожит даже от контакта", param.cancelled)
+    FakeDialog.last.press("negative")
+    plugin._sources.clear()
+
+fake_message = types.SimpleNamespace(
+    out=False,
+    peer_id=types.SimpleNamespace(channel_id=555),
+    from_id=None,
+    message="держи https://kanal.example/promo",
+    entities=None,
+)
+check("сообщение из канала считается чужим",
+      lg.LinkGuardPlugin._message_source(fake_message) == "unknown")
+check("своё сообщение считается доверенным",
+      lg.LinkGuardPlugin._message_source(types.SimpleNamespace(out=True)) == "trusted")
+
+plugin._sources.clear()
+plugin._index_source(fake_message, fake_message.message)
+check("источник запомнен для ссылки из сообщения",
+      plugin._sources.get("https://kanal.example/promo") == "unknown", plugin._sources)
+
 print("\nСовместимость со старым SDK")
 try:
     lite = load_plugin(minimal=True)
