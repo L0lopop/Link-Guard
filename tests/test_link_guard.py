@@ -107,6 +107,8 @@ class FakeParam:
 
 
 SENT_DOCUMENTS = []
+CURRENT_CHAT = [None]
+CURRENT_USER = [None]
 
 
 def install_stubs():
@@ -178,7 +180,9 @@ def install_stubs():
           Input=row, Divider=row, Text=row)
     _stub("ui.alert", AlertDialogBuilder=FakeDialog)
 
-    fragment = types.SimpleNamespace(getParentActivity=lambda: object())
+    fragment = types.SimpleNamespace(getParentActivity=lambda: object(),
+                                     getCurrentChat=lambda: CURRENT_CHAT[0],
+                                     getCurrentUser=lambda: CURRENT_USER[0])
     sent_documents = SENT_DOCUMENTS
     _stub("client_utils", get_last_fragment=lambda: fragment,
           run_on_queue=lambda fn, *a, **kw: fn(),
@@ -883,6 +887,34 @@ if handler is not None:
     check("опасное тревожит даже от контакта", param.cancelled)
     FakeDialog.last.press("negative")
     plugin._sources.clear()
+
+print("\nИсточник по открытому чату")
+CURRENT_CHAT[0] = types.SimpleNamespace(title="Новости")
+CURRENT_USER[0] = None
+check("открыт канал — ссылка считается чужой", plugin._fragment_source() == "unknown")
+
+CURRENT_CHAT[0] = None
+CURRENT_USER[0] = types.SimpleNamespace(contact=True)
+check("открыт чат с контактом — доверенная", plugin._fragment_source() == "trusted")
+
+CURRENT_USER[0] = types.SimpleNamespace(contact=False)
+check("незнакомец в личке — чужая", plugin._fragment_source() == "unknown")
+
+CURRENT_USER[0] = None
+check("не чат — источник неизвестен", plugin._fragment_source() is None)
+
+if handler is not None:
+    CURRENT_CHAT[0] = types.SimpleNamespace(title="Канал")
+    plugin._cache.clear()
+    plugin._sources.clear()
+    plugin.set_setting("show_mode", 0)
+    param = FakeParam("https://rasprodaja.xyz/iz-kanala")
+    handler.before_hooked_method(param)
+    check("ссылка из открытого канала поднимает разбор", param.cancelled)
+    check("в разборе указан чужой источник",
+          lg.t("src_stranger") in (FakeDialog.last.message or ""), FakeDialog.last.message)
+    FakeDialog.last.press("positive")
+    CURRENT_CHAT[0] = None
 
 fake_message = types.SimpleNamespace(
     out=False,

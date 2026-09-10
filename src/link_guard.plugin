@@ -783,7 +783,8 @@ def domain_age_days(domain, timeout=8):
                             headers={"User-Agent": "LinkGuard/%s" % __version__,
                                      "Accept": "application/rdap+json"})
         if resp.status_code != 200:
-            return None
+            log("LinkGuard: rdap %s HTTP %s" % (domain, resp.status_code))
+            return resp.status_code
         for event in resp.json().get("events", []) or []:
             if str(event.get("eventAction", "")).lower() != "registration":
                 continue
@@ -1416,9 +1417,14 @@ class LinkGuardPlugin(BasePlugin):
                 self._consume_update(updates)
                 return HookResult()
             total = items.size()
-            self._debug("updates: %s, внутри %d" % (container_name, total))
+            names = []
             for i in range(total):
-                self._consume_update(items.get(i))
+                item = items.get(i)
+                if len(names) < 6:
+                    names.append(type(item).__name__)
+                self._consume_update(item)
+            self._debug("updates: %s, внутри %d: %s"
+                        % (container_name, total, ", ".join(names) or "пусто"))
         except Exception as e:
             self._debug("updates: разбор не удался — %s" % e)
         return HookResult()
@@ -1463,6 +1469,28 @@ class LinkGuardPlugin(BasePlugin):
             if user is None:
                 return None
             return "trusted" if getattr(user, "contact", False) else "unknown"
+        except Exception:
+            return None
+
+    def _fragment_source(self):
+        fragment = get_last_fragment()
+        if fragment is None:
+            return None
+        try:
+            if fragment.getCurrentChat() is not None:
+                return "unknown"
+        except Exception:
+            pass
+        try:
+            user = fragment.getCurrentUser()
+        except Exception:
+            return None
+        if user is None:
+            return None
+        try:
+            if getattr(user, "self", False) or getattr(user, "contact", False):
+                return "trusted"
+            return "unknown"
         except Exception:
             return None
 
@@ -1577,7 +1605,7 @@ class LinkGuardPlugin(BasePlugin):
             return
 
         verdict = self._cached_analyze(url, self._anchors.get(url))
-        verdict.source = self._sources.get(url)
+        verdict.source = self._sources.get(url) or self._fragment_source()
         try:
             mode = int(self.get_setting("show_mode", 0) or 0)
         except (TypeError, ValueError):
@@ -1661,8 +1689,13 @@ class LinkGuardPlugin(BasePlugin):
             return hit[1]
         self._debug("rdap: спрашиваю %s" % domain)
         days = domain_age_days(domain)
-        if days is None:
+        if isinstance(days, int) and days > 1000000:
+            days = None
+        if days is None or days < 0:
             self._debug("rdap: %s — ответа нет" % domain)
+            return None
+        if days > 40000:
+            self._debug("rdap: %s — код ответа %s" % (domain, days))
             return None
         if len(cache) >= AGE_CACHE_MAX:
             cache.clear()
