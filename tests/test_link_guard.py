@@ -336,13 +336,13 @@ if handler is not None:
     check("опасный переход остановлен", param.cancelled)
     check("показан диалог с предупреждением",
           FakeDialog.last is not None and FakeDialog.last.shown
-          and FakeDialog.last.title == lg.t("title_danger"),
+          and FakeDialog.last.title == lg.phrase("title_danger"),
           FakeDialog.last.title if FakeDialog.last else None)
     check("на опасной ссылке главная кнопка — отмена",
-          FakeDialog.last.buttons["positive"][0] == lg.t("btn_cancel"),
+          FakeDialog.last.buttons["positive"][0] == lg.phrase("btn_cancel"),
           FakeDialog.last.buttons["positive"][0])
     check("переход спрятан во вторую кнопку",
-          FakeDialog.last.buttons["negative"][0] == lg.t("btn_open"))
+          FakeDialog.last.buttons["negative"][0] == lg.phrase("btn_open"))
     check("доверять опасному домену одним тапом нельзя",
           "neutral" not in FakeDialog.last.buttons)
 
@@ -388,10 +388,10 @@ check("наборы строк совпадают по ключам", not missin
       missing_en + missing_ru)
 saved_lang = lg.LANG
 lg.LANG = "en"
-check("английские строки подставляются", lg.t("btn_open") == "Open", lg.t("btn_open"))
-check("подстановка аргументов работает", "42" in lg.t("f_port", 42), lg.t("f_port", 42))
+check("английские строки подставляются", lg.phrase("btn_open") == "Open", lg.phrase("btn_open"))
+check("подстановка аргументов работает", "42" in lg.phrase("f_port", 42), lg.phrase("f_port", 42))
 lg.LANG = "xx"
-check("неизвестный язык падает на английский", lg.t("btn_cancel") == "Cancel")
+check("неизвестный язык падает на английский", lg.phrase("btn_cancel") == "Cancel")
 lg.LANG = saved_lang
 
 print("\nПодпись ссылки не совпадает с адресом")
@@ -457,7 +457,7 @@ if handler is not None:
     check("подозрительная ссылка остановлена", param.cancelled)
     FakeDialog.last.press("neutral")
     check("доверие спрашивает подтверждение",
-          FakeDialog.last.title == lg.t("trust_title"), FakeDialog.last.title)
+          FakeDialog.last.title == lg.phrase("trust_title"), FakeDialog.last.title)
     check("до подтверждения список пуст", not plugin.get_setting("whitelist", ""),
           plugin.get_setting("whitelist", ""))
 
@@ -506,13 +506,13 @@ rows = plugin._exception_rows()
 titles = [getattr(r, "text", None) for r in rows]
 check("каждый домен отдельной строкой",
       "shop.example.com" in titles and "ozon.ru" in titles, titles)
-check("в конце есть кнопка добавления", lg.t("btn_add") in titles, titles)
+check("в конце есть кнопка добавления", lg.phrase("btn_add") in titles, titles)
 
 remove = plugin._make_remove("ozon.ru")
 FakeDialog.last = None
 remove()
 check("удаление спрашивает подтверждение",
-      FakeDialog.last is not None and FakeDialog.last.title == lg.t("del_title"),
+      FakeDialog.last is not None and FakeDialog.last.title == lg.phrase("del_title"),
       FakeDialog.last.title if FakeDialog.last else None)
 FakeDialog.last.press("positive")
 check("отказ оставляет домен", "ozon.ru" in plugin._whitelist_list(), plugin._whitelist_list())
@@ -576,7 +576,7 @@ print("\nПояснения и лог")
 FakeDialog.last = None
 plugin._on_tags_note()
 check("пояснение про метки открывается окном",
-      FakeDialog.last is not None and FakeDialog.last.title == lg.t("tags_title"),
+      FakeDialog.last is not None and FakeDialog.last.title == lg.phrase("tags_title"),
       FakeDialog.last.title if FakeDialog.last else None)
 check("в окне полный текст, а не обрезок",
       "utm_source" in (FakeDialog.last.message or ""), FakeDialog.last.message)
@@ -584,7 +584,7 @@ check("в окне полный текст, а не обрезок",
 FakeDialog.last = None
 plugin._on_privacy_note()
 check("«как это работает» тоже открывается окном",
-      FakeDialog.last is not None and FakeDialog.last.title == lg.t("privacy_title"))
+      FakeDialog.last is not None and FakeDialog.last.title == lg.phrase("privacy_title"))
 
 print("\nСброс счётчиков")
 plugin.set_setting("stats_cleaned", 7)
@@ -650,9 +650,9 @@ FakeDialog.last = None
 plugin._show_update(info, "9.9.9")
 check("окно обновления показано", FakeDialog.last is not None and FakeDialog.last.shown)
 check("главная кнопка — установить",
-      FakeDialog.last.buttons["positive"][0] == lg.t("upd_install"))
+      FakeDialog.last.buttons["positive"][0] == lg.phrase("upd_install"))
 check("вторая кнопка — позже",
-      FakeDialog.last.buttons["negative"][0] == lg.t("btn_later"))
+      FakeDialog.last.buttons["negative"][0] == lg.phrase("btn_later"))
 check("в тексте есть пункты чейнджлога",
       "• вторая строка" in (FakeDialog.last.message or ""), FakeDialog.last.message)
 
@@ -660,9 +660,9 @@ FakeDialog.last.press("positive")
 check("нажатие запускает загрузку", downloads == [("https://example.com/link_guard.plugin", "9.9.9")],
       downloads)
 check("кнопка ведёт на новую версию, а не на отправку файла",
-      lg.t("upd_install") == "Перейти на новую версию", lg.t("upd_install"))
+      lg.phrase("upd_install") == "Перейти на новую версию", lg.phrase("upd_install"))
 check("во время загрузки показан индикатор",
-      FakeDialog.last is not None and FakeDialog.last.title == lg.t("upd_downloading"),
+      FakeDialog.last is not None and FakeDialog.last.title == lg.phrase("upd_downloading"),
       FakeDialog.last.title if FakeDialog.last else None)
 plugin._hide_progress()
 
@@ -870,7 +870,7 @@ check("внешний адрес локальным не считается", no
 home = lg.analyze("http://192.168.1.129:8096")
 check("домашний сервер не подозрителен", not home.suspicious, home.flags)
 check("но отмечен как локальный",
-      any(lg.t("f_ip_local") == text for _, text in home.flags), home.flags)
+      any(lg.phrase("f_ip_local") == text for _, text in home.flags), home.flags)
 foreign = lg.analyze("http://185.11.22.33/wallet/recovery")
 check("чужой IP остаётся подозрительным", foreign.suspicious, foreign.flags)
 
@@ -885,21 +885,21 @@ check("у домена спрашиваем", asked == ["example.com"], asked)
 lg.domain_age_days = real_rdap
 
 print("\nВозраст в разборе")
-check("дни", lg.human_age(12) == lg.t("age_days", 12))
-check("месяцы", lg.human_age(200) == lg.t("age_months", 6), lg.human_age(200))
-check("годы", lg.human_age(10670) == lg.t("age_years", 29), lg.human_age(10670))
+check("дни", lg.human_age(12) == lg.phrase("age_days", 12))
+check("месяцы", lg.human_age(200) == lg.phrase("age_months", 6), lg.human_age(200))
+check("годы", lg.human_age(10670) == lg.phrase("age_years", 29), lg.human_age(10670))
 
 aged = lg.analyze("https://vk.com:8080/feed")
 lg.add_age_flag(aged, 10670)
 check("старый домен не добавляет тревогу", len(aged.flags) == 1, aged.flags)
 check("но возраст попадает в окно",
-      lg.t("lbl_age", lg.human_age(10670)) in plugin._describe(aged),
+      lg.phrase("lbl_age", lg.human_age(10670)) in plugin._describe(aged),
       plugin._describe(aged))
 
 young = lg.analyze("https://pay-now.top/enter")
 lg.add_age_flag(young, 5)
 check("свежий домен и тревожит, и виден в окне",
-      young.risk == lg.HIGH and lg.t("lbl_age", lg.human_age(5)) in plugin._describe(young),
+      young.risk == lg.HIGH and lg.phrase("lbl_age", lg.human_age(5)) in plugin._describe(young),
       plugin._describe(young))
 
 print("\nИсточник ссылки")
@@ -921,7 +921,7 @@ if handler is not None:
     handler.before_hooked_method(param)
     check("из чужого чата — показываем разбор", param.cancelled)
     check("в разборе сказано, откуда ссылка",
-          lg.t("src_stranger") in (FakeDialog.last.message or ""), FakeDialog.last.message)
+          lg.phrase("src_stranger") in (FakeDialog.last.message or ""), FakeDialog.last.message)
     FakeDialog.last.press("positive")
 
     danger = "https://sberbank.ru@phish.top/login"
@@ -957,7 +957,7 @@ if handler is not None:
     handler.before_hooked_method(param)
     check("ссылка из открытого канала поднимает разбор", param.cancelled)
     check("в разборе указан чужой источник",
-          lg.t("src_stranger") in (FakeDialog.last.message or ""), FakeDialog.last.message)
+          lg.phrase("src_stranger") in (FakeDialog.last.message or ""), FakeDialog.last.message)
     FakeDialog.last.press("positive")
     CURRENT_CHAT[0] = None
 
