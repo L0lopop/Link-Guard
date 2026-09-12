@@ -1104,11 +1104,35 @@ for host in ("pineapple-shop.ru", "moy-magazin.shop",
           not any("не принадлежит" in text for _, text in v.flags), v.flags)
 
 check("имя ровно как у бренда, но в другой зоне, правилом не ловится",
-      lg.brand_with_extra("sberbank.com", lg.BRANDS) is None,
-      lg.brand_with_extra("sberbank.com", lg.BRANDS))
+      lg.brand_with_extra("sberbank.com", lg.BRANDS, lg.BRAND_LIST) is None,
+      lg.brand_with_extra("sberbank.com", lg.BRANDS, lg.BRAND_LIST))
 check("короткие названия ловятся только целым словом",
-      lg.brand_with_extra("vtb-vhod.ru", lg.BRANDS) == "vtb"
-      and lg.brand_with_extra("montblanc.ru", lg.BRANDS) is None)
+      lg.brand_with_extra("vtb-vhod.ru", lg.BRANDS, lg.BRAND_LIST) == "vtb"
+      and lg.brand_with_extra("montblanc.ru", lg.BRANDS, lg.BRAND_LIST) is None)
+check("список брендов отсортирован один раз, а не на каждой ссылке",
+      lg.BRAND_LIST == sorted(lg.BRANDS) and isinstance(lg.BRAND_LIST, list))
+
+print("\nБыстрый отсев не теряет опечатки")
+missed = []
+for brand in sorted(lg.BRANDS):
+    head, _, zone = brand.partition(".")
+    if len(head) < 5:
+        continue
+    variants = (
+        head[:-1] + "." + zone,
+        head + head[-1] + "." + zone,
+        head[:2] + head[3:] + "." + zone,
+        head[:-2] + head[-1] + head[-2] + "." + zone,
+    )
+    for variant in variants:
+        if variant in lg.BRANDS or variant == brand:
+            continue
+        found = any(brand.split(".")[0] in text
+                    for _, text in lg.analyze("https://%s/" % variant).flags)
+        if not found:
+            missed.append((brand, variant))
+check("однобуквенные опечатки во всех брендах ловятся: пропущено %d"
+      % len(missed), not missed, missed[:4])
 
 print("\nРепутация зон из базы")
 check("уровни зон прочитаны", database.zones == ZONES, database.zones)
@@ -1208,6 +1232,30 @@ if os.path.exists(REAL_DB):
 else:
     check("настоящая база найдена для проверки брендов", True,
           "пропущено: нет %s" % REAL_DB)
+
+print("\nСтарая база без новых разделов")
+old_sections = [
+    ("MALW", build_db.hash_section(BAD, build_db.FULL_BITS)[0]),
+    ("WHIT", build_db.hash_section(GOOD, build_db.WHITE_BITS)[0]),
+    ("BRND", b"example.com"),
+    ("PLAT", b"pages.dev"),
+]
+old_body = b"".join(build_db.section(t, p) for t, p in old_sections)
+old_blob = b"LGDB" + struct.pack(">BIB", 1, 20400, len(old_sections)) + old_body
+old_db = lg.DomainDatabase(old_blob)
+lg.install_database(old_db)
+check("старая база читается", old_db.total == len(BAD), old_db.total)
+check("зон в ней нет", old_db.zones == {}, old_db.zones)
+v = lg.analyze("https://moshennik.top/vhod")
+check("мошеннический домен по-прежнему ловится", v.risk == lg.HIGH, v.flags)
+v = lg.analyze("https://kakoy-to-sayt.top/")
+check("зона берётся из встроенного списка",
+      any(lg.phrase("f_tld", "top") == t for _, t in v.flags), v.flags)
+v = lg.analyze("https://kakoy-to-sayt.digital/")
+check("без данных о зоне тревоги нет", not v.flags, v.flags)
+v = lg.analyze("https://sberbank-shop.ru/")
+check("имя с приставкой не зависит от базы", v.risk == lg.HIGH, v.flags)
+lg.install_database(None)
 
 print("\nБаза: порченые файлы")
 for broken, title in (

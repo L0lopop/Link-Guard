@@ -878,6 +878,21 @@ def levenshtein(left, right):
 
 BRAND_CORE_MIN = 3
 BRAND_GLUED_MIN = 6
+BRAND_LIST = sorted(BRANDS)
+
+
+def letter_mask(text):
+    mask = 0
+    for char in text:
+        mask |= 1 << (ord(char) & 63)
+    return mask
+
+
+def brand_index(brand_list):
+    return [(brand, len(brand), letter_mask(brand)) for brand in brand_list]
+
+
+BRAND_INDEX = brand_index(BRAND_LIST)
 
 
 def label_tokens(label):
@@ -892,12 +907,12 @@ def label_tokens(label):
     return tokens
 
 
-def brand_with_extra(reg, brands):
+def brand_with_extra(reg, brands, brand_list):
     if reg in brands:
         return None
     label = reg.split(".")[0]
     tokens = label_tokens(label)
-    for brand in sorted(brands):
+    for brand in brand_list:
         core = brand.split(".")[0]
         if len(core) < BRAND_CORE_MIN or core in GENERIC_LABELS:
             continue
@@ -1083,20 +1098,26 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         verdict.add(HIGH, phrase("f_mixed", ", ".join(names)))
 
     known_brands = BRANDS
+    known_index = BRAND_INDEX
     if database is not None and database.brands:
-        known_brands = BRANDS | database.brands
+        known_brands = database.all_brands
+        known_index = database.brand_index
 
     defused = to_latin_lookalike(shown)
     defused_reg = registrable(defused)
     if defused_reg != reg and defused_reg in known_brands:
         verdict.add(HIGH, phrase("f_lookalike", defused_reg))
     elif defused_reg not in known_brands and not known_good:
-        for brand in sorted(known_brands):
-            if abs(len(defused_reg) - len(brand)) > 2:
+        own_length = len(defused_reg)
+        own_mask = letter_mask(defused_reg)
+        for brand, length, mask in known_index:
+            if abs(own_length - length) > 2:
                 continue
-            limit = 1 if len(brand) < 10 else 2
+            limit = 1 if length < 10 else 2
             if brand not in BRANDS:
                 limit = 1
+            if bin(own_mask ^ mask).count("1") > limit:
+                continue
             dist = levenshtein(defused_reg, brand)
             if 1 <= dist <= limit:
                 verdict.add(HIGH, phrase("f_typo", brand, dist,
@@ -1105,7 +1126,7 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
 
     if reg not in known_brands:
         labels = shown.split(".")
-        for brand in sorted(BRANDS):
+        for brand in BRAND_LIST:
             head = brand.split(".")[0]
             if len(head) < 5 or head in GENERIC_LABELS:
                 continue
@@ -1129,7 +1150,7 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         verdict.add(LOW, phrase("f_port", port))
 
     if not known_good:
-        stolen = brand_with_extra(reg, BRANDS)
+        stolen = brand_with_extra(reg, BRANDS, BRAND_LIST)
         if stolen:
             verdict.add(HIGH, phrase("f_brand_extra", stolen))
 
@@ -1208,11 +1229,14 @@ DB_MANIFEST_MAX = 64 * 1024
 DB_CHECK_GAP = 3 * 60 * 60
 DB_TICK_GAP = 30 * 60
 DB_RETRY_GAP = 60 * 60
+DB_RETRY_LIMIT = 3
+DB_RETRY_LONG = 6 * 60 * 60
 DB_MAX_BYTES = 24 * 1024 * 1024
 DB_MAGIC = b"LGDB"
 DB_FORMAT = 1
 DB_HEADER = 10
 DB_INDEX_ENTRY = 12
+DB_HASH_SECTIONS = ("MALW", "WHIT", "FR10", "FR30")
 
 
 class DomainDatabase:
@@ -1228,10 +1252,15 @@ class DomainDatabase:
         for _ in range(count):
             tag = blob[offset:offset + 4].decode("ascii")
             length = struct.unpack(">I", blob[offset + 4:offset + 8])[0]
+            if offset + 8 + length > len(blob):
+                raise ValueError("раздел %s выходит за границы файла" % tag)
             self.sections[tag] = blob[offset + 8:offset + 8 + length]
             offset += 8 + length
         if "MALW" not in self.sections:
             raise ValueError("нет раздела с доменами")
+        for tag in DB_HASH_SECTIONS:
+            if tag in self.sections:
+                self._check_hashes(tag)
         self.platforms = self._lines("PLAT")
         self.brands = self._lines("BRND")
         self.suffixes = self._lines("SUFX")
@@ -1240,7 +1269,22 @@ class DomainDatabase:
             parts = line.split(" ")
             if len(parts) == 2 and parts[1].isdigit():
                 self.zones[parts[0]] = int(parts[1])
+        self.all_brands = BRANDS | self.brands
+        self.brand_list = sorted(self.all_brands)
+        self.brand_index = brand_index(self.brand_list)
         self.total = struct.unpack(">I", self.sections["MALW"][1:5])[0]
+
+    def _check_hashes(self, tag):
+        raw = self.sections[tag]
+        if len(raw) < 11:
+            raise ValueError("раздел %s короче заголовка" % tag)
+        bits, count, block, index_count = struct.unpack(">BIHI", raw[:11])
+        if not 8 <= bits <= 64:
+            raise ValueError("раздел %s: разрядность %d" % (tag, bits))
+        if 11 + index_count * DB_INDEX_ENTRY > len(raw):
+            raise ValueError("раздел %s: указатель не помещается" % tag)
+        if count and not index_count:
+            raise ValueError("раздел %s: записи без указателя" % tag)
 
     def _lines(self, tag):
         raw = self.sections.get(tag)
@@ -1742,10 +1786,19 @@ class LinkGuardPlugin(BasePlugin):
         except (TypeError, ValueError):
             return 0.0
 
+    def _failures(self):
+        try:
+            return int(self.get_setting("db_failures", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
     def _due_for_refresh(self, database):
         now = time.time()
         if database is None:
-            return now - self._moment("db_attempt_at") >= DB_RETRY_GAP
+            gap = DB_RETRY_GAP
+            if self._failures() >= DB_RETRY_LIMIT:
+                gap = DB_RETRY_LONG
+            return now - self._moment("db_attempt_at") >= gap
         return now - self._moment("db_checked_at") >= DB_CHECK_GAP
 
     def _tick_database(self):
@@ -1764,11 +1817,18 @@ class LinkGuardPlugin(BasePlugin):
         if not self._database_enabled():
             install_database(None)
             return
-        database = read_database(self._database_path())
+        path = self._database_path()
+        database = read_database(path)
         if database is not None:
             install_database(database)
             self._debug("db: с диска, %d записей, возраст %d дн." % (
                 database.total, database.age_days))
+        elif path and os.path.exists(path):
+            try:
+                os.remove(path)
+                self._debug("db: испорченный файл удалён")
+            except Exception as e:
+                self._debug("db: испорченный файл не удалён: %s" % e)
         if self._due_for_refresh(database):
             self._run_background(lambda: self._refresh_database(manual=False))
 
@@ -1786,17 +1846,20 @@ class LinkGuardPlugin(BasePlugin):
         content = fetch_database(DB_NAME)
         self.set_setting("db_attempt_at", time.time())
         if not content:
+            self.set_setting("db_failures", self._failures() + 1)
             if manual:
                 run_on_ui_thread(lambda: self._toast(phrase("db_failed")))
             return
         try:
             database = DomainDatabase(content)
         except Exception as e:
+            self.set_setting("db_failures", self._failures() + 1)
             self._debug("db: файл не разобран: %s" % e)
             if manual:
                 run_on_ui_thread(lambda: self._toast(phrase("db_failed")))
             return
 
+        self.set_setting("db_failures", 0)
         install_database(database)
         if getattr(self, "_cache", None) is not None:
             self._cache.clear()
