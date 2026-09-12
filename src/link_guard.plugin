@@ -2,7 +2,7 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.4.1"
+__version__ = "1.5.0"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
@@ -213,6 +213,9 @@ STRINGS = {
         "f_blocklist": "Сайт числится в списках мошеннических",
         "f_blocklist_parent": "Домен %s числится в списках мошеннических",
         "f_tld": "Доменная зона .%s часто используется для одноразовых мошеннических сайтов",
+        "f_tld_worst": "Зона .%s — одна из самых неблагополучных: мошеннических сайтов в ней в десятки раз больше, чем известных",
+        "f_fresh_10": "Домен зарегистрирован меньше десяти дней назад, а в имени — название известного сервиса",
+        "f_fresh_30": "Домен зарегистрирован меньше месяца назад, а в имени — название известного сервиса",
         "f_deep": "Очень длинная цепочка поддоменов",
         "f_long": "Неестественно длинный домен",
         "f_bait": "В адресе слова-приманки: %s",
@@ -359,6 +362,9 @@ STRINGS = {
         "f_blocklist": "The site is listed in scam databases",
         "f_blocklist_parent": "The domain %s is listed in scam databases",
         "f_tld": "The .%s zone is often used for throwaway scam sites",
+        "f_tld_worst": "The .%s zone is one of the worst: it holds far more scam sites than known ones",
+        "f_fresh_10": "The domain was registered less than ten days ago and carries a well-known name",
+        "f_fresh_30": "The domain was registered less than a month ago and carries a well-known name",
         "f_deep": "A very long chain of subdomains",
         "f_long": "Unnaturally long domain",
         "f_bait": "Bait words in the address: %s",
@@ -404,7 +410,7 @@ STRINGS = {
 
 LANG = "ru"
 
-DEBUG_BUILD = False
+DEBUG_BUILD = True
 LOG_MAX = 400
 
 
@@ -1087,8 +1093,12 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         verdict.add(LOW, phrase("f_port", port))
 
     tld = host.rsplit(".", 1)[-1]
-    if tld in RISKY_TLD and not known_good:
-        verdict.add(LOW, phrase("f_tld", tld))
+    if not known_good:
+        level = database.zone_level(tld) if database is not None else 0
+        if level >= 3:
+            verdict.add(MEDIUM, phrase("f_tld_worst", tld))
+        elif level == 2 or (not level and tld in RISKY_TLD):
+            verdict.add(LOW, phrase("f_tld", tld))
 
     if not known_good:
         if host.count(".") >= 4:
@@ -1107,6 +1117,17 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         if path_low.endswith(ext):
             verdict.add(HIGH, phrase("f_exec", ext))
             break
+
+    if database is not None and not known_good:
+        try:
+            fresh = database.freshness(reg)
+        except Exception as e:
+            fresh = 0
+            log("LinkGuard: freshness failed: %s" % e)
+        if fresh == 10:
+            verdict.add(HIGH if verdict.flags else MEDIUM, phrase("f_fresh_10"))
+        elif fresh == 30:
+            verdict.add(MEDIUM if verdict.flags else LOW, phrase("f_fresh_30"))
 
     if reg in SHORTENERS or host in SHORTENERS:
         verdict.is_shortener = True
@@ -1171,6 +1192,11 @@ class DomainDatabase:
         self.platforms = self._lines("PLAT")
         self.brands = self._lines("BRND")
         self.suffixes = self._lines("SUFX")
+        self.zones = {}
+        for line in self._lines("TLDR"):
+            parts = line.split(" ")
+            if len(parts) == 2 and parts[1].isdigit():
+                self.zones[parts[0]] = int(parts[1])
         self.total = struct.unpack(">I", self.sections["MALW"][1:5])[0]
 
     def _lines(self, tag):
@@ -1251,6 +1277,16 @@ class DomainDatabase:
             if self._contains("MALW", candidate):
                 return candidate
         return None
+
+    def zone_level(self, zone):
+        return self.zones.get(zone, 0)
+
+    def freshness(self, host):
+        if self._contains("FR10", host):
+            return 10
+        if self._contains("FR30", host):
+            return 30
+        return 0
 
 
 _database = None

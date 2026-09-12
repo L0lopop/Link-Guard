@@ -1027,14 +1027,25 @@ BAD = ["moshennik.top", "sber-oplata.xyz", "phish.pages.dev"]
 GOOD = ["primer-horoshiy-sayt-s-dlinnym-imenem.top"]
 
 
-def make_database(bad=BAD, good=GOOD, platforms=("pages.dev",)):
+FRESH10 = ["sber-bonus-new.top"]
+FRESH30 = ["oplata-dostavki-new.ru"]
+ZONES = {"xyz": 3, "shop": 2}
+
+
+def make_database(bad=BAD, good=GOOD, platforms=("pages.dev",),
+                  fresh10=FRESH10, fresh30=FRESH30, zones=ZONES):
     malw, _ = build_db.hash_section(bad, build_db.FULL_BITS)
     whit, _ = build_db.hash_section(good, build_db.WHITE_BITS)
+    fr10, _ = build_db.hash_section(fresh10, build_db.FULL_BITS)
+    fr30, _ = build_db.hash_section(fresh30, build_db.FULL_BITS)
+    zone_text = "\n".join("%s %d" % (z, lvl) for z, lvl in sorted(zones.items()))
     sections = [
         ("MALW", malw),
         ("WHIT", whit),
+        ("TLDR", zone_text.encode("utf-8")),
+        ("FR10", fr10),
+        ("FR30", fr30),
         ("BRND", b"example.com"),
-        ("TLDR", b"top 100"),
         ("PLAT", "\n".join(platforms).encode("utf-8")),
     ]
     body = b"".join(build_db.section(tag, payload) for tag, payload in sections)
@@ -1066,6 +1077,43 @@ check("платформа целиком не блокируется",
 
 v = lg.analyze("https://primer-horoshiy-sayt-s-dlinnym-imenem.top/")
 check("у посещаемого сайта мелкие придирки сняты", v.risk == lg.INFO, v.flags)
+
+print("\nРепутация зон из базы")
+check("уровни зон прочитаны", database.zones == ZONES, database.zones)
+v = lg.analyze("https://kakoy-to-sayt.xyz/")
+check("худшая зона даёт средний риск", v.risk == lg.MEDIUM, v.flags)
+check("в разборе названа зона",
+      any(lg.phrase("f_tld_worst", "xyz") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.shop/")
+check("зона попроще даёт слабое замечание", v.risk == lg.LOW, v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.ru/")
+check("обычная зона замечаний не даёт", not v.flags, v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.zip/")
+check("зона из встроенного списка работает, когда в базе её нет",
+      v.risk == lg.LOW, v.flags)
+
+print("\nСвежерегистрированные домены")
+v = lg.analyze("https://sber-bonus-new.top/")
+check("домен младше десяти дней тревожит",
+      any(lg.phrase("f_fresh_10") == text for _, text in v.flags), v.flags)
+check("и поднимает риск до высокого вместе с прочим",
+      v.risk == lg.HIGH, v.flags)
+
+v = lg.analyze("https://lk.sber-bonus-new.top/vhod")
+check("поддомен свежего домена тоже тревожит",
+      any(lg.phrase("f_fresh_10") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://oplata-dostavki-new.ru/")
+check("домен младше месяца отмечается мягче",
+      any(lg.phrase("f_fresh_30") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://staryy-sayt-obychnyy.ru/")
+check("давно живущий домен не трогаем",
+      not any(lg.phrase("f_fresh_10") == text or lg.phrase("f_fresh_30") == text
+              for _, text in v.flags), v.flags)
 
 lg.install_database(None)
 v = lg.analyze("https://moshennik.top/vhod")
@@ -1103,6 +1151,23 @@ if os.path.exists(REAL_DB):
                 "2gis.ru", "sravni.ru", "banki.ru", "auto.ru", "cian.ru"]
     noisy = [h for h in everyday if lg.analyze("https://%s/" % h).risk == lg.HIGH]
     check("обычные сайты не тревожат: %s" % noisy, not noisy)
+
+    fresh_words = (lg.phrase("f_fresh_10"), lg.phrase("f_fresh_30"))
+    mistaken = []
+    for host in sorted(real.brands)[:400] + everyday:
+        for _, text in lg.analyze("https://%s/" % host).flags:
+            if text in fresh_words:
+                mistaken.append(host)
+                break
+    check("посещаемые сайты не считаются свежими: %d" % len(mistaken),
+          not mistaken, mistaken[:5])
+
+    zones_seen = sum(1 for _, text in
+                     lg.analyze("https://kakoy-to-novyy-sayt.digital/").flags
+                     if text == lg.phrase("f_tld_worst", "digital"))
+    check("репутация зон работает на настоящей базе", zones_seen == 1,
+          lg.analyze("https://kakoy-to-novyy-sayt.digital/").flags)
+
     lg.install_database(None)
 else:
     check("настоящая база найдена для проверки брендов", True,
