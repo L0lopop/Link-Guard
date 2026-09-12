@@ -1151,35 +1151,55 @@ check("состояние базы описано словами",
       isinstance(db_plugin._database_status(), str) and db_plugin._database_status())
 check("качается только полная база", lg.DB_NAME == "full.lgdb", lg.DB_NAME)
 
-real_localtime = lg.time.localtime
+baza = types.SimpleNamespace(age_days=0, total=10)
+today = db_plugin._today()
 
+db_plugin.set_setting("db_checked_day", "")
+db_plugin.set_setting("db_attempt_at", 0)
+check("в первый раз за день база обновляется", db_plugin._due_for_refresh(baza))
 
-def at_hour(hour):
-    return lambda *args: types.SimpleNamespace(tm_hour=hour)
+db_plugin.set_setting("db_checked_day", today)
+check("второй раз за день не обновляется", not db_plugin._due_for_refresh(baza))
+check("и при отсутствии базы тоже не дёргаем",
+      not db_plugin._due_for_refresh(None))
 
+db_plugin.set_setting("db_checked_day", "2026-09-01")
+check("на следующий день обновляется снова", db_plugin._due_for_refresh(baza))
 
-svezhaya = types.SimpleNamespace(age_days=0, total=10)
-staraya = types.SimpleNamespace(age_days=lg.DB_STALE_DAYS, total=10)
+db_plugin.set_setting("db_attempt_at", lg.time.time())
+check("после неудачной попытки ждём, а не долбим",
+      not db_plugin._due_for_refresh(baza))
+db_plugin.set_setting("db_attempt_at", lg.time.time() - lg.DB_RETRY_GAP - 1)
+check("через час после неудачи пробуем ещё раз",
+      db_plugin._due_for_refresh(baza))
+check("повтор после неудачи — раз в час", lg.DB_RETRY_GAP == 60 * 60,
+      lg.DB_RETRY_GAP)
 
-db_plugin.set_setting("db_checked_at", 0)
-lg.time.localtime = at_hour(3)
-check("ночью свежая база обновляется", db_plugin._due_for_refresh(svezhaya))
-lg.time.localtime = at_hour(14)
-check("днём свежую базу не трогаем", not db_plugin._due_for_refresh(svezhaya))
-check("днём устаревшую всё же качаем", db_plugin._due_for_refresh(staraya))
-check("днём при отсутствии базы качаем", db_plugin._due_for_refresh(None))
-lg.time.localtime = at_hour(0)
-check("в полночь окно уже открыто", db_plugin._due_for_refresh(svezhaya))
-lg.time.localtime = at_hour(6)
-check("в шесть утра окно уже закрыто", not db_plugin._due_for_refresh(svezhaya))
-
-lg.time.localtime = at_hour(3)
-db_plugin.set_setting("db_checked_at", lg.time.time())
-check("дважды за ночь не качаем", not db_plugin._due_for_refresh(svezhaya))
-lg.time.localtime = real_localtime
+db_plugin.set_setting("db_checked_day", "")
+db_plugin.set_setting("db_attempt_at", 0)
 
 check("обновления проверяются раз в шесть часов",
       lg.UPDATE_INTERVAL == 6 * 60 * 60, lg.UPDATE_INTERVAL)
+
+print("\nБаза: цифры в настройках не отстают")
+drawn = []
+real_set_setting = db_plugin.set_setting
+
+
+def watched_set_setting(key, value, reload_settings=False):
+    if reload_settings:
+        drawn.append(key)
+    return real_set_setting(key, value)
+
+
+db_plugin.set_setting = watched_set_setting
+db_plugin._toast = lambda text: None
+db_plugin._after_refresh(2984808, manual=True)
+check("после обновления экран перерисовывается", "db_entries" in drawn, drawn)
+check("новое число запомнено",
+      int(db_plugin.get_setting("db_entries", 0)) == 2984808,
+      db_plugin.get_setting("db_entries", 0))
+db_plugin.set_setting = real_set_setting
 
 print("\nБаза: проверка при открытии ссылки")
 started_refresh = []
@@ -1211,10 +1231,36 @@ db_plugin.set_setting("use_database", True)
 db_plugin._due_for_refresh = lambda database: False
 db_plugin._db_ticked = 0.0
 db_plugin._tick_database()
-check("вне ночного окна переход к загрузке не приводит",
+check("если на сегодня уже обновлялись, загрузки нет",
       len(started_refresh) == 2, len(started_refresh))
 check("заглядываем не чаще раза в полчаса", lg.DB_TICK_GAP == 30 * 60,
       lg.DB_TICK_GAP)
+
+print("\nДиагностика")
+check("сборка помечена отладочной", lg.DEBUG_BUILD is True)
+diag = db_plugin._diagnostic_rows()
+check("раздел диагностики есть в настройках", len(diag) == 3, len(diag))
+db_plugin._log = []
+db_plugin.set_setting("debug_log", False)
+db_plugin._debug("этого в журнале быть не должно")
+check("при выключенном тумблере журнал пуст", not db_plugin._log, db_plugin._log)
+db_plugin.set_setting("debug_log", True)
+db_plugin._debug("первая запись")
+db_plugin._debug("вторая запись")
+check("записи попадают в журнал", len(db_plugin._log) == 2, db_plugin._log)
+check("в тексте журнала видно версию и обе записи",
+      "первая запись" in db_plugin._log_text()
+      and "вторая запись" in db_plugin._log_text()
+      and lg.__version__ in db_plugin._log_text())
+for i in range(lg.LOG_MAX + 50):
+    db_plugin._debug("запись %d" % i)
+check("журнал не растёт без предела", len(db_plugin._log) == lg.LOG_MAX,
+      len(db_plugin._log))
+db_plugin._on_clear_log()
+check("журнал очищается", not db_plugin._log, db_plugin._log)
+check("у пустого журнала понятный текст",
+      db_plugin._log_text() == lg.phrase("log_empty"))
+db_plugin.set_setting("debug_log", False)
 
 print("\nСовместимость со старым SDK")
 try:
