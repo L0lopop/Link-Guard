@@ -1,0 +1,42 @@
+name: Отметка о жизни репозитория
+
+on:
+  schedule:
+    - cron: "0 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  touch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Записать состояние базы
+        run: |
+          mkdir -p state
+          curl -sSL --fail --max-time 120 \
+            -o state/manifest.json \
+            "https://github.com/L0lopop/Link-Guard/releases/download/feeds/manifest.json" \
+            || echo '{}' > state/manifest.json
+          python -c "import json; d=json.load(open('state/manifest.json')); print('сборка', d.get('built'), '| записей', (d.get('full') or {}).get('entries'))"
+
+      - name: Закрепить коммитом
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/manifest.json
+          if git diff --cached --quiet; then
+            git commit --allow-empty -m "Отметка о жизни репозитория"
+          else
+            git commit -m "Состояние базы на $(date -u +%Y-%m-%d)"
+          fi
+          git push
