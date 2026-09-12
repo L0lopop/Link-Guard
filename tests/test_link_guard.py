@@ -1078,6 +1078,38 @@ check("платформа целиком не блокируется",
 v = lg.analyze("https://primer-horoshiy-sayt-s-dlinnym-imenem.top/")
 check("у посещаемого сайта мелкие придирки сняты", v.risk == lg.INFO, v.flags)
 
+print("\nИмя банка с приставкой")
+for host in ("sberbank-shop.ru", "sberbankshop.com", "tinkoff-oplata.top",
+             "vtb-online.info", "gosuslugi-vyplaty.shop", "wildberries-sale.ru",
+             "ozon-bonus.store", "yandex-dostavka.site", "avito-dostavka.top",
+             "telegram-premium.shop", "whatsapp-web.online"):
+    v = lg.analyze("https://%s/" % host)
+    named = [text for _, text in v.flags if "не принадлежит" in text]
+    check("%s — высокий риск" % host, v.risk == lg.HIGH and named, v.flags)
+
+for host in ("sberbank.ru", "tinkoff.ru", "gosuslugi.ru", "ozon.ru",
+             "wildberries.ru", "yandex.ru", "avito.ru", "telegram.org"):
+    v = lg.analyze("https://%s/" % host)
+    check("%s не тронут" % host,
+          not any("не принадлежит" in text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://steampowered-fan.ru/")
+check("чужое имя с приставкой ловится даже у безобидного с виду сайта",
+      any("steampowered" in text for _, text in v.flags), v.flags)
+
+for host in ("pineapple-shop.ru", "moy-magazin.shop",
+             "kakoy-to-sayt.ru", "post-service.ru", "mail-arhiv.ru"):
+    v = lg.analyze("https://%s/" % host)
+    check("%s не считается подделкой" % host,
+          not any("не принадлежит" in text for _, text in v.flags), v.flags)
+
+check("имя ровно как у бренда, но в другой зоне, правилом не ловится",
+      lg.brand_with_extra("sberbank.com", lg.BRANDS) is None,
+      lg.brand_with_extra("sberbank.com", lg.BRANDS))
+check("короткие названия ловятся только целым словом",
+      lg.brand_with_extra("vtb-vhod.ru", lg.BRANDS) == "vtb"
+      and lg.brand_with_extra("montblanc.ru", lg.BRANDS) is None)
+
 print("\nРепутация зон из базы")
 check("уровни зон прочитаны", database.zones == ZONES, database.zones)
 v = lg.analyze("https://kakoy-to-sayt.xyz/")
@@ -1086,7 +1118,11 @@ check("в разборе названа зона",
       any(lg.phrase("f_tld_worst", "xyz") == text for _, text in v.flags), v.flags)
 
 v = lg.analyze("https://kakoy-to-sayt.shop/")
-check("зона попроще даёт слабое замечание", v.risk == lg.LOW, v.flags)
+check("зона попроще сама по себе молчит", not v.flags, v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.shop/oplata/podtverdite")
+check("но вместе с другой находкой добавляет замечание",
+      any(lg.phrase("f_tld", "shop") == text for _, text in v.flags), v.flags)
 
 v = lg.analyze("https://kakoy-to-sayt.ru/")
 check("обычная зона замечаний не даёт", not v.flags, v.flags)
@@ -1140,12 +1176,12 @@ if os.path.exists(REAL_DB):
     check("разбор укладывается в 40 мс", per_call < 40, per_call)
 
     alarms = []
-    for host in sorted(real.brands)[:400]:
+    for host in sorted(real.brands):
         verdict = lg.analyze("https://%s/" % host)
         if verdict.risk == lg.HIGH:
             alarms.append((host, verdict.flags))
-    check("сами бренды не считаются подделками: тревог %d" % len(alarms),
-          not alarms, alarms[:3])
+    check("тысяча посещаемых сайтов не считается подделками: тревог %d"
+          % len(alarms), not alarms, alarms[:3])
 
     everyday = ["ya.ru", "dzen.ru", "habr.com", "rutracker.org", "kinopoisk.ru",
                 "2gis.ru", "sravni.ru", "banki.ru", "auto.ru", "cian.ru"]
@@ -1154,7 +1190,7 @@ if os.path.exists(REAL_DB):
 
     fresh_words = (lg.phrase("f_fresh_10"), lg.phrase("f_fresh_30"))
     mistaken = []
-    for host in sorted(real.brands)[:400] + everyday:
+    for host in sorted(real.brands) + everyday:
         for _, text in lg.analyze("https://%s/" % host).flags:
             if text in fresh_words:
                 mistaken.append(host)

@@ -214,6 +214,7 @@ STRINGS = {
         "f_blocklist_parent": "Домен %s числится в списках мошеннических",
         "f_tld": "Доменная зона .%s часто используется для одноразовых мошеннических сайтов",
         "f_tld_worst": "Зона .%s — одна из самых неблагополучных: мошеннических сайтов в ней в десятки раз больше, чем известных",
+        "f_brand_extra": "В имени домена стоит «%s», но сайт этому сервису не принадлежит",
         "f_fresh_10": "Домен зарегистрирован меньше десяти дней назад, а в имени — название известного сервиса",
         "f_fresh_30": "Домен зарегистрирован меньше месяца назад, а в имени — название известного сервиса",
         "f_deep": "Очень длинная цепочка поддоменов",
@@ -363,6 +364,7 @@ STRINGS = {
         "f_blocklist_parent": "The domain %s is listed in scam databases",
         "f_tld": "The .%s zone is often used for throwaway scam sites",
         "f_tld_worst": "The .%s zone is one of the worst: it holds far more scam sites than known ones",
+        "f_brand_extra": "The domain name carries «%s», but the site does not belong to that service",
         "f_fresh_10": "The domain was registered less than ten days ago and carries a well-known name",
         "f_fresh_30": "The domain was registered less than a month ago and carries a well-known name",
         "f_deep": "A very long chain of subdomains",
@@ -874,6 +876,40 @@ def levenshtein(left, right):
     return prev[-1]
 
 
+BRAND_CORE_MIN = 3
+BRAND_GLUED_MIN = 6
+
+
+def label_tokens(label):
+    parts = re.split(r"[^a-z0-9]+", label)
+    tokens = set()
+    for part in parts:
+        if not part:
+            continue
+        tokens.add(part)
+        for piece in re.findall(r"[a-z]+", part):
+            tokens.add(piece)
+    return tokens
+
+
+def brand_with_extra(reg, brands):
+    if reg in brands:
+        return None
+    label = reg.split(".")[0]
+    tokens = label_tokens(label)
+    for brand in sorted(brands):
+        core = brand.split(".")[0]
+        if len(core) < BRAND_CORE_MIN or core in GENERIC_LABELS:
+            continue
+        if label == core:
+            return None
+        if core in tokens:
+            return core
+        if len(core) >= BRAND_GLUED_MIN and core in label:
+            return core
+    return None
+
+
 def registrable(host):
     parts = host.split(".")
     if len(parts) < 2:
@@ -1092,13 +1128,10 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
     if port and port not in (80, 443):
         verdict.add(LOW, phrase("f_port", port))
 
-    tld = host.rsplit(".", 1)[-1]
     if not known_good:
-        level = database.zone_level(tld) if database is not None else 0
-        if level >= 3:
-            verdict.add(MEDIUM, phrase("f_tld_worst", tld))
-        elif level == 2 or (not level and tld in RISKY_TLD):
-            verdict.add(LOW, phrase("f_tld", tld))
+        stolen = brand_with_extra(reg, BRANDS)
+        if stolen:
+            verdict.add(HIGH, phrase("f_brand_extra", stolen))
 
     if not known_good:
         if host.count(".") >= 4:
@@ -1117,6 +1150,16 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         if path_low.endswith(ext):
             verdict.add(HIGH, phrase("f_exec", ext))
             break
+
+    if not known_good:
+        tld = host.rsplit(".", 1)[-1]
+        level = database.zone_level(tld) if database is not None else 0
+        if level >= 3:
+            verdict.add(MEDIUM, phrase("f_tld_worst", tld))
+        elif not level and tld in RISKY_TLD:
+            verdict.add(LOW, phrase("f_tld", tld))
+        elif level == 2 and verdict.flags:
+            verdict.add(LOW, phrase("f_tld", tld))
 
     if database is not None and not known_good:
         try:
