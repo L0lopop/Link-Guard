@@ -1152,30 +1152,49 @@ check("состояние базы описано словами",
 check("качается только полная база", lg.DB_NAME == "full.lgdb", lg.DB_NAME)
 
 baza = types.SimpleNamespace(age_days=0, total=10)
-today = db_plugin._today()
+now = lg.time.time()
 
-db_plugin.set_setting("db_checked_day", "")
-db_plugin.set_setting("db_attempt_at", 0)
-check("в первый раз за день база обновляется", db_plugin._due_for_refresh(baza))
+check("проверяем раз в три часа", lg.DB_CHECK_GAP == 3 * 60 * 60, lg.DB_CHECK_GAP)
 
-db_plugin.set_setting("db_checked_day", today)
-check("второй раз за день не обновляется", not db_plugin._due_for_refresh(baza))
-check("и при отсутствии базы тоже не дёргаем",
-      not db_plugin._due_for_refresh(None))
-
-db_plugin.set_setting("db_checked_day", "2026-09-01")
-check("на следующий день обновляется снова", db_plugin._due_for_refresh(baza))
-
-db_plugin.set_setting("db_attempt_at", lg.time.time())
-check("после неудачной попытки ждём, а не долбим",
+db_plugin.set_setting("db_checked_at", now)
+check("сразу после проверки повторно не лезем",
       not db_plugin._due_for_refresh(baza))
-db_plugin.set_setting("db_attempt_at", lg.time.time() - lg.DB_RETRY_GAP - 1)
-check("через час после неудачи пробуем ещё раз",
-      db_plugin._due_for_refresh(baza))
+db_plugin.set_setting("db_checked_at", now - lg.DB_CHECK_GAP - 1)
+check("через три часа проверяем снова", db_plugin._due_for_refresh(baza))
+
+db_plugin.set_setting("db_attempt_at", now)
+check("без базы после неудачи ждём час, а не долбим",
+      not db_plugin._due_for_refresh(None))
+db_plugin.set_setting("db_attempt_at", now - lg.DB_RETRY_GAP - 1)
+check("через час пробуем скачать снова", db_plugin._due_for_refresh(None))
 check("повтор после неудачи — раз в час", lg.DB_RETRY_GAP == 60 * 60,
       lg.DB_RETRY_GAP)
 
-db_plugin.set_setting("db_checked_day", "")
+print("\nБаза: качаем только изменившуюся")
+downloads = []
+lg.fetch_database = lambda name, timeout=90: downloads.append(name)
+lg.fetch_database_stamp = lambda timeout=20: "2026-09-12 02:36 UTC"
+lg.install_database(baza)
+db_plugin.set_setting("db_built", "2026-09-12 02:36 UTC")
+db_plugin._refresh_database(manual=False)
+check("та же сборка на сервере — загрузки нет", not downloads, downloads)
+check("но время проверки записано",
+      db_plugin._moment("db_checked_at") > now - 5,
+      db_plugin._moment("db_checked_at"))
+
+db_plugin.set_setting("db_built", "2026-09-11 02:37 UTC")
+db_plugin._refresh_database(manual=False)
+check("новая сборка на сервере — качаем", downloads == ["full.lgdb"], downloads)
+
+downloads[:] = []
+db_plugin.set_setting("db_built", "2026-09-12 02:36 UTC")
+db_plugin._refresh_database(manual=True)
+check("кнопка в настройках качает всегда", downloads == ["full.lgdb"], downloads)
+
+lg.install_database(None)
+lg.fetch_database = lambda name, timeout=90: None
+lg.fetch_database_stamp = lambda timeout=20: None
+db_plugin.set_setting("db_checked_at", 0)
 db_plugin.set_setting("db_attempt_at", 0)
 
 check("обновления проверяются раз в шесть часов",
@@ -1231,31 +1250,39 @@ db_plugin.set_setting("use_database", True)
 db_plugin._due_for_refresh = lambda database: False
 db_plugin._db_ticked = 0.0
 db_plugin._tick_database()
-check("если на сегодня уже обновлялись, загрузки нет",
+check("если проверялись недавно, загрузки нет",
       len(started_refresh) == 2, len(started_refresh))
 check("заглядываем не чаще раза в полчаса", lg.DB_TICK_GAP == 30 * 60,
       lg.DB_TICK_GAP)
 
 print("\nДиагностика")
-check("сборка помечена отладочной", lg.DEBUG_BUILD is True)
 diag = db_plugin._diagnostic_rows()
-check("раздел диагностики есть в настройках", len(diag) == 3, len(diag))
+if lg.DEBUG_BUILD:
+    check("раздел диагностики на месте", len(diag) == 3, len(diag))
+else:
+    check("в сборке для каталога раздела диагностики нет", diag == [], diag)
 db_plugin._log = []
 db_plugin.set_setting("debug_log", False)
 db_plugin._debug("этого в журнале быть не должно")
 check("при выключенном тумблере журнал пуст", not db_plugin._log, db_plugin._log)
+
 db_plugin.set_setting("debug_log", True)
 db_plugin._debug("первая запись")
 db_plugin._debug("вторая запись")
-check("записи попадают в журнал", len(db_plugin._log) == 2, db_plugin._log)
-check("в тексте журнала видно версию и обе записи",
-      "первая запись" in db_plugin._log_text()
-      and "вторая запись" in db_plugin._log_text()
-      and lg.__version__ in db_plugin._log_text())
-for i in range(lg.LOG_MAX + 50):
-    db_plugin._debug("запись %d" % i)
-check("журнал не растёт без предела", len(db_plugin._log) == lg.LOG_MAX,
-      len(db_plugin._log))
+if lg.DEBUG_BUILD:
+    check("записи попадают в журнал", len(db_plugin._log) == 2, db_plugin._log)
+    check("в тексте журнала видно версию и обе записи",
+          "первая запись" in db_plugin._log_text()
+          and "вторая запись" in db_plugin._log_text()
+          and lg.__version__ in db_plugin._log_text())
+    for i in range(lg.LOG_MAX + 50):
+        db_plugin._debug("запись %d" % i)
+    check("журнал не растёт без предела", len(db_plugin._log) == lg.LOG_MAX,
+          len(db_plugin._log))
+else:
+    check("в сборке для каталога журнал не копится",
+          not db_plugin._log, db_plugin._log)
+
 db_plugin._on_clear_log()
 check("журнал очищается", not db_plugin._log, db_plugin._log)
 check("у пустого журнала понятный текст",

@@ -2,7 +2,7 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.4.2"
+__version__ = "1.4.1"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
@@ -404,7 +404,7 @@ STRINGS = {
 
 LANG = "ru"
 
-DEBUG_BUILD = True
+DEBUG_BUILD = False
 LOG_MAX = 400
 
 
@@ -1139,6 +1139,9 @@ def add_age_flag(verdict, days):
 
 DB_BASE_URL = "https://github.com/L0lopop/Link-Guard/releases/download/feeds/"
 DB_NAME = "full.lgdb"
+DB_MANIFEST_NAME = "manifest.json"
+DB_MANIFEST_MAX = 64 * 1024
+DB_CHECK_GAP = 3 * 60 * 60
 DB_TICK_GAP = 30 * 60
 DB_RETRY_GAP = 60 * 60
 DB_MAX_BYTES = 24 * 1024 * 1024
@@ -1276,6 +1279,24 @@ def read_database(path):
             return DomainDatabase(handle.read())
     except Exception as e:
         log("LinkGuard: db read failed: %s" % e)
+        return None
+
+
+def fetch_database_stamp(timeout=20):
+    try:
+        import requests
+        resp = requests.get(DB_BASE_URL + DB_MANIFEST_NAME, timeout=timeout,
+                            headers={"User-Agent": "LinkGuard/%s" % __version__,
+                                     "Cache-Control": "no-cache"})
+        if resp.status_code != 200 or len(resp.content) > DB_MANIFEST_MAX:
+            return None
+        data = resp.json()
+        if not isinstance(data, dict):
+            return None
+        stamp = str(data.get("built") or "")
+        return stamp or None
+    except Exception as e:
+        log("LinkGuard: db stamp failed: %s" % e)
         return None
 
 
@@ -1636,18 +1657,17 @@ class LinkGuardPlugin(BasePlugin):
         folders = self._writable_dirs()
         return os.path.join(folders[0], "link_guard_domains.lgdb") if folders else None
 
-    @staticmethod
-    def _today():
-        return time.strftime("%Y-%m-%d", time.localtime())
+    def _moment(self, key):
+        try:
+            return float(self.get_setting(key, 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _due_for_refresh(self, database):
-        if str(self.get_setting("db_checked_day", "") or "") == self._today():
-            return False
-        try:
-            attempt = float(self.get_setting("db_attempt_at", 0) or 0)
-        except (TypeError, ValueError):
-            attempt = 0
-        return time.time() - attempt >= DB_RETRY_GAP
+        now = time.time()
+        if database is None:
+            return now - self._moment("db_attempt_at") >= DB_RETRY_GAP
+        return now - self._moment("db_checked_at") >= DB_CHECK_GAP
 
     def _tick_database(self):
         if not self._database_enabled():
@@ -1656,7 +1676,9 @@ class LinkGuardPlugin(BasePlugin):
         if now - getattr(self, "_db_ticked", 0) < DB_TICK_GAP:
             return
         self._db_ticked = now
-        if self._due_for_refresh(active_database()):
+        due = self._due_for_refresh(active_database())
+        self._debug("db: пора проверять — %s" % ("да" if due else "нет"))
+        if due:
             self._run_background(lambda: self._refresh_database(manual=False))
 
     def _load_database(self):
@@ -1674,6 +1696,14 @@ class LinkGuardPlugin(BasePlugin):
     def _refresh_database(self, manual=False):
         if not self._database_enabled():
             return
+        stamp = fetch_database_stamp()
+        if stamp:
+            self.set_setting("db_checked_at", time.time())
+            known = str(self.get_setting("db_built", "") or "")
+            if not manual and stamp == known and active_database() is not None:
+                self._debug("db: на сервере та же сборка (%s), не качаем" % stamp)
+                return
+            self._debug("db: на сервере сборка %s, у нас %s" % (stamp, known or "нет"))
         content = fetch_database(DB_NAME)
         self.set_setting("db_attempt_at", time.time())
         if not content:
@@ -1699,8 +1729,10 @@ class LinkGuardPlugin(BasePlugin):
             except Exception as e:
                 self._debug("db: не сохранилась: %s" % e)
         total = database.total
-        self.set_setting("db_checked_day", self._today())
-        self._debug("db: из сети, %d записей" % total)
+        self.set_setting("db_checked_at", time.time())
+        if stamp:
+            self.set_setting("db_built", stamp)
+        self._debug("db: из сети, %d записей, сборка %s" % (total, stamp or "?"))
         run_on_ui_thread(lambda: self._after_refresh(total, manual))
 
     def _after_refresh(self, total, manual):
