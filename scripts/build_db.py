@@ -46,6 +46,12 @@ WHITE_BITS = 36
 MIN_FEEDS = 3
 MIN_TOTAL = 500000
 
+# Отчёт прошлой сборки: по нему видно, какой источник перестал меняться.
+PREVIOUS_MANIFEST_URL = ("https://github.com/L0lopop/Link-Guard/releases/"
+                         "download/feeds/manifest.json")
+STALE_DAYS = 5
+SHRINK_LIMIT = 0.5
+
 POPULAR_SUBDOMAIN_LIMIT = 20
 
 # Через сколько записей начинается новый блок и сколько весит одна
@@ -60,6 +66,13 @@ STRIP_PREFIXES = ("0.0.0.0 ", "127.0.0.1 ", "0.0.0.0\t", "127.0.0.1\t", "||", "a
 
 def log(msg):
     print(msg, flush=True)
+
+
+def warn(msg):
+    """Предупреждение. В Actions оно попадает в сводку запуска."""
+    log("ВНИМАНИЕ: %s" % msg)
+    if os.environ.get("GITHUB_ACTIONS"):
+        print("::warning::%s" % msg, flush=True)
 
 
 def fetch(url, binary=False):
@@ -178,27 +191,94 @@ def write_db(path, built_day, sections):
     return len(header) + len(body)
 
 
-def collect_feeds(report):
+def previous_report():
+    """Отчёт прошлой сборки. Пустой словарь, если его нет."""
+    text, _ = fetch(PREVIOUS_MANIFEST_URL)
+    if text is None:
+        return {}
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except ValueError:
+        return {}
+
+
+def fingerprint(hosts):
+    """Отпечаток содержимого источника.
+
+    Считается по именам, а не по тексту: заголовки некоторых списков
+    несут дату выгрузки и менялись бы каждый день даже у замершего.
+    """
+    digest = hashlib.sha256()
+    for host in sorted(hosts):
+        digest.update(host.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def feed_status(previous, mark, today):
+    """Когда содержимое источника менялось в последний раз.
+
+    Возвращает дату последнего изменения и сколько дней прошло с тех пор.
+    """
+    if not previous or previous.get("fingerprint") != mark:
+        return today, 0
+    changed = previous.get("last_changed") or today
+    try:
+        was = datetime.strptime(changed, "%Y-%m-%d").date()
+        now = datetime.strptime(today, "%Y-%m-%d").date()
+        frozen = max(0, (now - was).days)
+    except ValueError:
+        return today, 0
+    return changed, frozen
+
+
+def collect_feeds(report, previous):
     membership = defaultdict(set)
     healthy = 0
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    old_feeds = previous.get("feeds") or {}
+
     for name, url in FEEDS:
         text, meta = fetch(url)
         if text is None:
             report["feeds"][name] = {"ok": False}
+            warn("источник %s не скачался" % name)
             continue
-        accepted = 0
+
+        hosts = set()
         for line in text.splitlines():
             host = normalize(line)
             if host:
-                membership[host].add(name)
-                accepted += 1
+                hosts.add(host)
+        mark = fingerprint(hosts)
+        changed, frozen = feed_status(old_feeds.get(name), mark, today)
+
+        for host in hosts:
+            membership[host].add(name)
         healthy += 1
+
         report["feeds"][name] = {
             "ok": True,
-            "accepted": accepted,
+            "accepted": len(hosts),
             "last_modified": meta.get("last_modified"),
+            "fingerprint": mark,
+            "last_changed": changed,
+            "frozen_days": frozen,
         }
-        log("  %-17s %8d записей" % (name, accepted))
+        note = "" if frozen < 1 else "  не менялся %d дн." % frozen
+        log("  %-17s %8d записей%s" % (name, len(hosts), note))
+        if frozen >= STALE_DAYS:
+            warn("источник %s не менялся %d дней подряд — похоже, он замер"
+                 % (name, frozen))
+
+        # Источник может не замереть, а обвалиться: отдать остаток вместо списка.
+        before = (old_feeds.get(name) or {}).get("accepted") or 0
+        if before and len(hosts) < before * SHRINK_LIMIT:
+            warn("источник %s отдал %d записей вместо %d — падение на %d%%"
+                 % (name, len(hosts), before,
+                    round((1 - len(hosts) / before) * 100)))
+        del hosts
     return membership, healthy
 
 
@@ -268,7 +348,8 @@ def main():
     report = {"built": started.strftime("%Y-%m-%d %H:%M UTC"), "feeds": {}}
 
     log("== источники вредоносных доменов ==")
-    membership, healthy = collect_feeds(report)
+    previous = previous_report()
+    membership, healthy = collect_feeds(report, previous)
     if healthy < MIN_FEEDS:
         log("ОШИБКА: доступно источников %d, нужно минимум %d" % (healthy, MIN_FEEDS))
         return 1
@@ -345,6 +426,20 @@ def main():
     })
     with open(os.path.join(OUT_DIR, "manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)
+
+    # Заметное падение числа адресов — признак, что источник отдал обрезок.
+    was = (previous.get("full") or {}).get("entries") or 0
+    if was and full_count < was * 0.8:
+        warn("адресов стало %d против %d в прошлый раз — падение на %d%%"
+             % (full_count, was, round((1 - full_count / was) * 100)))
+
+    frozen = sorted((info.get("frozen_days", 0), name)
+                    for name, info in report["feeds"].items()
+                    if info.get("frozen_days", 0) >= STALE_DAYS)
+    if frozen:
+        log("== замершие источники ==")
+        for days, name in frozen:
+            log("  %-17s не менялся %d дн." % (name, days))
 
     log("== файлы ==")
     log("  full.lgdb  %8.2f МБ  %d записей" % (full_size / 1048576, full_count))

@@ -164,6 +164,43 @@ def main():
     print("  разделы: %s" % ", ".join(sorted(full.sections)))
     print("  платформ: %d, брендов: %d" % (len(full.platforms), len(full.brands)))
 
+    print("== учёт замерших источников ==")
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "scripts"))
+    import build_db
+
+    mark = build_db.fingerprint(["b.example", "a.example"])
+    check(mark == build_db.fingerprint(["a.example", "b.example"]),
+          "порядок имён на отпечаток не влияет")
+    check(mark != build_db.fingerprint(["a.example"]),
+          "изменившийся список даёт другой отпечаток")
+
+    # Заголовок с датой выгрузки меняется каждый день, имена — нет.
+    same = build_db.fingerprint([build_db.normalize(line) for line in
+                                 ("# Last Update: 12 Sep", "a.example") if
+                                 build_db.normalize(line)])
+    other = build_db.fingerprint([build_db.normalize(line) for line in
+                                  ("# Last Update: 13 Sep", "a.example") if
+                                  build_db.normalize(line)])
+    check(same == other, "смена даты в шапке списка не считается изменением")
+
+    changed, frozen = build_db.feed_status(None, mark, "2026-09-12")
+    check(changed == "2026-09-12" and frozen == 0, "без прошлых данных счёт с нуля")
+
+    was = {"fingerprint": mark, "last_changed": "2026-09-05"}
+    changed, frozen = build_db.feed_status(was, mark, "2026-09-12")
+    check(changed == "2026-09-05" and frozen == 7,
+          "неизменный источник копит дни: получили %s / %s" % (changed, frozen))
+    check(frozen >= build_db.STALE_DAYS, "семь дней уже повод предупредить")
+
+    changed, frozen = build_db.feed_status(was, "drugoy", "2026-09-12")
+    check(changed == "2026-09-12" and frozen == 0,
+          "обновившийся источник сбрасывает счёт")
+
+    broken_date = {"fingerprint": mark, "last_changed": "не дата"}
+    changed, frozen = build_db.feed_status(broken_date, mark, "2026-09-12")
+    check(frozen == 0, "испорченная дата не роняет сборку")
+
     print("== мусор не ломает читалку ==")
     for broken, title in (
         (b"", "пустой файл"),
