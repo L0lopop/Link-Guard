@@ -70,8 +70,6 @@ except Exception:
     def find_class(name):
         return None
 
-# Каждое имя импортируется отдельно: в разных сборках клиента набор
-# доступных функций отличается, и отсутствие одной не должно ронять остальные.
 try:
     from client_utils import get_user_config
 except ImportError:
@@ -108,7 +106,6 @@ except ImportError:
     JavaFile = None
 
 
-# Все видимые строки собраны в одном месте: так их проще править и переводить.
 STRINGS = {
     "ru": {
         "hdr_checks": "Проверка ссылок",
@@ -390,7 +387,6 @@ def phrase(key, *args):
     return text % args if args else text
 
 
-# Параметры слежки, которые режем всегда — ни один сайт от их потери не ломается.
 TRACKER_EXACT = {
     "fbclid",
     "gclid",
@@ -439,7 +435,6 @@ TRACKER_EXACT = {
 TRACKER_PREFIXES = ("utm_", "pk_", "mtm_", "piwik_", "hsa_", "at_custom", "stm_",
                     "matomo_", "sc_")
 
-# Эти режем только в агрессивном режиме: иногда они несут смысл.
 TRACKER_AGGRESSIVE = {
     "ref",
     "referer",
@@ -494,7 +489,6 @@ SHORTENERS = {
     "tlgg.ru",
 }
 
-# Домены, под которые чаще всего маскируются. Сравниваем расстоянием Левенштейна.
 BRANDS = {
     "telegram.org",
     "t.me",
@@ -565,7 +559,6 @@ BRANDS = {
     "steamgifts.com",
 }
 
-# Слишком общие слова: встречаются в поддоменах честных сайтов (mail.company.com).
 GENERIC_LABELS = {
     "mail",
     "office",
@@ -575,7 +568,6 @@ GENERIC_LABELS = {
     "wallet",
 }
 
-# Зоны, где доля мошеннических доменов исторически высокая.
 RISKY_TLD = {
     "zip",
     "mov",
@@ -616,7 +608,6 @@ RISKY_TLD = {
     "webcam",
 }
 
-# Слова-приманки в адресе. Сами по себе не улика, но в сумме с прочим — сигнал.
 BAIT_WORDS = (
     "login",
     "signin",
@@ -672,7 +663,6 @@ DANGEROUS_SCHEMES = {
     "jar",
 }
 
-# Кириллица и греческий, неотличимые от латиницы в большинстве шрифтов.
 LOOKALIKE_LETTERS = {
     "а": "a",
     "б": "b",
@@ -704,7 +694,6 @@ LOOKALIKE_LETTERS = {
     "υ": "u",
 }
 
-# Двухуровневые суффиксы, чтобы правильно вычислять регистрируемый домен.
 TWO_LEVEL_TLD = {
     "co.uk",
     "org.uk",
@@ -746,7 +735,6 @@ DOMAIN_RE = re.compile(r"[a-z0-9\-.]+\.[a-zЀ-ӿ]{2,}")
 
 
 def is_private_ip(host):
-    """Адреса домашней сети: тревожиться из-за своего роутера незачем."""
     try:
         first, second = (int(part) for part in host.split(".")[:2])
     except (TypeError, ValueError):
@@ -757,7 +745,6 @@ def is_private_ip(host):
 
 
 def plural_form(forms, count):
-    """Русские числительные: 1 день, 2 дня, 5 дней, 11 дней."""
     one, few, many = (str(forms).split("|") + ["", ""])[:3]
     tail = abs(int(count)) % 100
     if 11 <= tail <= 14:
@@ -775,7 +762,6 @@ def amount(count, unit_key):
 
 
 def human_age(days):
-    """Возраст домена словами: сутки, недели, месяцы или годы."""
     if days < 1:
         return phrase("age_today")
     if days < 14:
@@ -838,11 +824,6 @@ class Verdict:
 
 
 def levenshtein(left, right):
-    """Расстояние правки, где перестановка соседних знаков стоит единицу.
-
-    Обычная мера считает её за две, и самая частая опечатка —
-    переставленные буквы — оставалась незамеченной.
-    """
     if left == right:
         return 0
     if not left or not right:
@@ -861,7 +842,6 @@ def levenshtein(left, right):
 
 
 def registrable(host):
-    """Домен, который реально кто-то зарегистрировал, с учётом co.uk и подобных."""
     parts = host.split(".")
     if len(parts) < 2:
         return host
@@ -902,12 +882,10 @@ def scripts_of(text):
 
 
 def to_latin_lookalike(host):
-    """Приводим обманки к латинице, чтобы поймать sbеrbank.ru с кириллической «е»."""
     return "".join(LOOKALIKE_LETTERS.get(ch, ch) for ch in host.lower())
 
 
 def slice_utf16(text, offset, length):
-    """Telegram считает смещения в единицах UTF-16: эмодзи до ссылки сдвигает индексы."""
     if not length:
         return ""
     try:
@@ -918,7 +896,6 @@ def slice_utf16(text, offset, length):
 
 
 def anchor_domain(text):
-    """Домен из подписи ссылки, если подпись вообще похожа на адрес."""
     if not text:
         return ""
     candidate = text.strip().strip("<>()[]«»\"'").rstrip(".,;:!?")
@@ -932,7 +909,6 @@ def anchor_domain(text):
 
 
 def normalize_domain(text):
-    """Приводит введённое пользователем к виду example.com или возвращает пустую строку."""
     value = str(text).strip().lower()
     if not value:
         return ""
@@ -950,7 +926,6 @@ def normalize_domain(text):
 
 
 def clean_url(url, aggressive=False):
-    """Убирает трекинг-параметры. Возвращает (чистый_url, список_убранного)."""
     try:
         parts = urlsplit(url)
     except Exception:
@@ -1050,8 +1025,6 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         for brand in sorted(known_brands):
             if abs(len(defused_reg) - len(brand)) > 2:
                 continue
-            # Своим спискам доверяем больше: подхваченным из сети засчитываем
-            # только правку в один знак, иначе похожие короткие имена спорят.
             limit = 1 if len(brand) < 10 else 2
             if brand not in BRANDS:
                 limit = 1
@@ -1120,7 +1093,6 @@ REPO_URL = "https://github.com/L0lopop/Link-Guard"
 UPDATE_URL = "https://raw.githubusercontent.com/L0lopop/Link-Guard/main/update.json"
 UPDATE_INTERVAL = 6 * 60 * 60
 
-# RDAP отдаёт дату регистрации домена бесплатно и без ключей.
 RDAP_URL = "https://rdap.org/domain/%s"
 AGE_ALARM_DAYS = 30
 AGE_NOTE_DAYS = 120
@@ -1140,13 +1112,10 @@ def add_age_flag(verdict, days):
 
 DB_BASE_URL = "https://github.com/L0lopop/Link-Guard/releases/download/feeds/"
 DB_NAME = "full.lgdb"
-# Обновляемся ночью, когда телефон обычно на зарядке и в сети.
 DB_NIGHT_FROM = 0
 DB_NIGHT_TO = 6
 DB_MIN_GAP = 20 * 60 * 60
-# Как часто вообще имеет смысл заглядывать, не пора ли обновиться.
 DB_TICK_GAP = 30 * 60
-# Если ночью приложение не открывали, база не должна стареть бесконечно.
 DB_STALE_DAYS = 3
 DB_MAX_BYTES = 24 * 1024 * 1024
 DB_MAGIC = b"LGDB"
@@ -1156,7 +1125,6 @@ DB_INDEX_ENTRY = 12
 
 
 class DomainDatabase:
-    """Список мошеннических доменов, собранный на стороне репозитория."""
 
     def __init__(self, blob):
         if not blob.startswith(DB_MAGIC):
@@ -1239,11 +1207,9 @@ class DomainDatabase:
         return False
 
     def is_popular(self, host):
-        """Известный посещаемый сайт."""
         return self._contains("WHIT", host)
 
     def chain(self, host):
-        """Имена, которые нужно проверить для этого адреса."""
         parts = host.split(".")
         result = []
         for i in range(len(parts) - 1):
@@ -1254,7 +1220,6 @@ class DomainDatabase:
         return result
 
     def malicious_hit(self, host):
-        """Возвращает совпавшее имя или None."""
         for candidate in self.chain(host):
             if self._contains("MALW", candidate):
                 return candidate
@@ -1276,7 +1241,6 @@ def install_database(database):
 
 
 def read_database(path):
-    """Читает файл базы с диска. None, если файла нет или он испорчен."""
     try:
         if not path or not os.path.exists(path):
             return None
@@ -1292,7 +1256,6 @@ def read_database(path):
 
 
 def fetch_database(name, timeout=90):
-    """Скачивает файл базы. Возвращает содержимое или None."""
     try:
         import requests
         resp = requests.get(DB_BASE_URL + name, timeout=timeout,
@@ -1311,7 +1274,6 @@ def fetch_database(name, timeout=90):
 
 
 def domain_age_days(domain, timeout=8):
-    """Возраст домена в днях по данным RDAP. None — узнать не удалось."""
     try:
         import datetime
         import requests
@@ -1593,7 +1555,6 @@ class LinkGuardPlugin(BasePlugin):
             return 0
 
     def _count_once(self, url):
-        """openUrl вызывает сам себя через перегрузки — считаем метки один раз."""
         seen = getattr(self, "_counted", None)
         if seen is None:
             seen = self._counted = {}
@@ -1640,7 +1601,6 @@ class LinkGuardPlugin(BasePlugin):
         return os.path.join(folders[0], "link_guard_domains.lgdb") if folders else None
 
     def _due_for_refresh(self, database):
-        """Ночью — раз в сутки. Днём — только если базы нет или она устарела."""
         try:
             last = float(self.get_setting("db_checked_at", 0) or 0)
         except (TypeError, ValueError):
@@ -1653,12 +1613,6 @@ class LinkGuardPlugin(BasePlugin):
         return DB_NIGHT_FROM <= hour < DB_NIGHT_TO
 
     def _tick_database(self):
-        """Изредка смотрит, не пора ли обновить базу.
-
-        Плагин загружается один раз при запуске клиента, а тот может
-        работать неделями подряд. Без этого ночное окно просто не
-        наступало бы, и база обновлялась бы только по запасному правилу.
-        """
         if not self._database_enabled():
             return
         now = time.time()
@@ -1669,7 +1623,6 @@ class LinkGuardPlugin(BasePlugin):
             self._run_background(lambda: self._refresh_database(manual=False))
 
     def _load_database(self):
-        """База с диска, затем при необходимости обновление из репозитория."""
         if not self._database_enabled():
             install_database(None)
             return
@@ -1682,7 +1635,6 @@ class LinkGuardPlugin(BasePlugin):
             self._run_background(lambda: self._refresh_database(manual=False))
 
     def _refresh_database(self, manual=False):
-        """Скачивает базу, сохраняет на диск и подставляет её взамен старой."""
         if not self._database_enabled():
             return
         content = fetch_database(DB_NAME)
@@ -1722,7 +1674,6 @@ class LinkGuardPlugin(BasePlugin):
         self._run_background(lambda: self._refresh_database(manual=True))
 
     def _sync_database_mode(self):
-        """Тумблер выключили или включили — подстраиваем состояние."""
         enabled = self._database_enabled()
         if enabled == bool(self.get_setting("db_applied", True)):
             return
@@ -1903,7 +1854,6 @@ class LinkGuardPlugin(BasePlugin):
     MAX_PLUGIN_SIZE = 2 * 1024 * 1024
 
     def _looks_like_our_plugin(self, content):
-        """Не сохраняем и не ставим то, что не является этим же плагином."""
         if not content or len(content) > self.MAX_PLUGIN_SIZE:
             return False
         head = content[:4096].decode("utf-8", "ignore")
@@ -1941,7 +1891,6 @@ class LinkGuardPlugin(BasePlugin):
         self._toast(phrase("upd_dl_failed"))
 
     def _launch_install(self, path):
-        """Отдаём скачанный файл штатному установщику клиента."""
         if PluginsController is None:
             self._debug("update: PluginsController недоступен")
             return False
@@ -2045,7 +1994,6 @@ class LinkGuardPlugin(BasePlugin):
 
     @staticmethod
     def _message_source(message):
-        """Тот же вопрос, но по объекту сообщения из входящего обновления."""
         try:
             if getattr(message, "out", False):
                 return "trusted"
@@ -2074,7 +2022,6 @@ class LinkGuardPlugin(BasePlugin):
             return None
 
     def _fragment_source(self):
-        """Откуда ссылка: открытый канал и незнакомец — чужие, контакт и своё — доверенные."""
         fragment = get_last_fragment()
         if fragment is None:
             return None
@@ -2154,7 +2101,6 @@ class LinkGuardPlugin(BasePlugin):
         anchors[url] = shown
 
     def _cached_analyze(self, url, anchor=None):
-        """Разбор с кэшем на несколько минут: одна ссылка в чате не считается заново."""
         aggressive = self._aggressive()
         whitelist = self._whitelist()
         signature = (aggressive, tuple(sorted(whitelist)), anchor or "", LANG)
@@ -2187,7 +2133,6 @@ class LinkGuardPlugin(BasePlugin):
         return None, None
 
     def _is_approved(self, url):
-        """Одобренную ссылку пропускаем окном в секунды: хук срабатывает повторно."""
         now = time.monotonic()
         stamps = getattr(self, "_bypass", None)
         if not stamps:
@@ -2198,7 +2143,6 @@ class LinkGuardPlugin(BasePlugin):
         return url in stamps
 
     def on_open_url(self, param):
-        """Точка входа: клиент собирается открыть адрес, решаем что с ним делать."""
         if not self.get_setting("check_enabled", True):
             return
 
@@ -2286,7 +2230,6 @@ class LinkGuardPlugin(BasePlugin):
         self._run_background(worker)
 
     def _domain_age(self, domain):
-        """Возраст домена с недельным кэшем; у IP и не-доменов не спрашиваем."""
         if not domain:
             return None
         cache = getattr(self, "_ages", None)
@@ -2449,7 +2392,6 @@ class LinkGuardPlugin(BasePlugin):
 
     @staticmethod
     def _replace_url_arg(args, index, url):
-        """Клиент передаёт адрес строкой или объектом Uri — подменяем оба вида."""
         if index is None or not args:
             return False
         current = args[index]

@@ -1,11 +1,3 @@
-"""Проверка логики Link Guard без Android-рантайма.
-
-Android-модули плагина подменяются заглушками, после чего файл .plugin
-загружается как обычный питоновский модуль и тестируется чистая логика:
-разбор ссылки и вычистка трекеров.
-
-Запуск: python tests/test_link_guard.py
-"""
 
 import os
 import struct
@@ -243,7 +235,6 @@ def load_plugin(minimal=False):
 
 
 lg = load_plugin()
-# Проверка при открытии ссылки умеет качать базу, а тесты в сеть не ходят.
 lg.fetch_database = lambda name, timeout=90: None
 
 failures = []
@@ -810,8 +801,6 @@ plugin._anchors.clear()
 plugin._sources.clear()
 
 print("\nСписки внутри плагина")
-# Раньше эти записи приезжали отдельным файлом из репозитория.
-# Файла больше нет, и проверка следит, что при переносе ничего не выпало.
 for brand in ("aliexpress.ru", "citilink.ru", "dns-shop.ru", "mvideo.ru",
               "eldorado.ru", "lamoda.ru", "sportmaster.ru", "rzd.ru",
               "aeroflot.ru", "pochtabank.ru", "raiffeisen.ru", "psbank.ru",
@@ -1030,8 +1019,6 @@ check("источник запомнен для ссылки из сообщен
       plugin._sources.get("https://kanal.example/promo") == "unknown", plugin._sources)
 
 print("\nБаза мошеннических доменов")
-# Базу собираем тем же кодом, что работает в Actions: если сборщик и
-# читалка разойдутся в формате, тест это поймает.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "scripts"))
 import build_db
@@ -1086,8 +1073,6 @@ check("без базы проверка по ней не идёт",
       not any(lg.phrase("f_blocklist") == text for _, text in v.flags), v.flags)
 
 print("\nБренды подхватываются из базы")
-# В разделе BRND лежит тысяча посещаемых доменов, обновляемая вместе с базой.
-# Плагин должен ловить подделки под них, не зная их заранее.
 REAL_DB = os.path.join(tempfile.gettempdir(), "lgdb_test", "full.lgdb")
 if os.path.exists(REAL_DB):
     real = lg.read_database(REAL_DB)
@@ -1106,7 +1091,6 @@ if os.path.exists(REAL_DB):
     print("  %.1f мс на разбор с тысячей брендов" % per_call)
     check("разбор укладывается в 40 мс", per_call < 40, per_call)
 
-    # Главный риск: чужой домен случайно окажется в одной правке от бренда.
     alarms = []
     for host in sorted(real.brands)[:400]:
         verdict = lg.analyze("https://%s/" % host)
@@ -1167,7 +1151,6 @@ check("состояние базы описано словами",
       isinstance(db_plugin._database_status(), str) and db_plugin._database_status())
 check("качается только полная база", lg.DB_NAME == "full.lgdb", lg.DB_NAME)
 
-# Ночное окно: подменяем часы и проверяем, когда плагин решает качать.
 real_localtime = lg.time.localtime
 
 
@@ -1199,8 +1182,6 @@ check("обновления проверяются раз в шесть часо
       lg.UPDATE_INTERVAL == 6 * 60 * 60, lg.UPDATE_INTERVAL)
 
 print("\nБаза: проверка при открытии ссылки")
-# Клиент может работать неделями без перезапуска, поэтому заглядываем
-# ещё и при переходе по ссылке — иначе ночное окно не наступает.
 started_refresh = []
 db_plugin._run_background = lambda func: started_refresh.append(func)
 db_plugin._due_for_refresh = lambda database: True
@@ -1226,8 +1207,6 @@ db_plugin._tick_database()
 check("при выключенной базе не проверяет", len(started_refresh) == 2,
       len(started_refresh))
 
-# Решение о самой загрузке остаётся за расписанием: частые переходы
-# не должны превращаться в частые скачивания.
 db_plugin.set_setting("use_database", True)
 db_plugin._due_for_refresh = lambda database: False
 db_plugin._db_ticked = 0.0

@@ -1,9 +1,3 @@
-"""Сборка базы доменов для Link Guard.
-
-Скачивает публичные списки, объединяет их, отсекает популярные сайты
-и записывает файл full.lgdb, который скачивает плагин.
-Запускается из GitHub Actions по расписанию.
-"""
 
 import hashlib
 import json
@@ -46,7 +40,6 @@ WHITE_BITS = 36
 MIN_FEEDS = 3
 MIN_TOTAL = 500000
 
-# Отчёт прошлой сборки: по нему видно, какой источник перестал меняться.
 PREVIOUS_MANIFEST_URL = ("https://github.com/L0lopop/Link-Guard/releases/"
                          "download/feeds/manifest.json")
 STALE_DAYS = 5
@@ -54,8 +47,6 @@ SHRINK_LIMIT = 0.5
 
 POPULAR_SUBDOMAIN_LIMIT = 20
 
-# Через сколько записей начинается новый блок и сколько весит одна
-# строка указателя: значение (8 байт) и смещение в данных (4 байта).
 BLOCK_SIZE = 256
 INDEX_ENTRY = 12
 
@@ -69,14 +60,12 @@ def log(msg):
 
 
 def warn(msg):
-    """Предупреждение. В Actions оно попадает в сводку запуска."""
     log("ВНИМАНИЕ: %s" % msg)
     if os.environ.get("GITHUB_ACTIONS"):
         print("::warning::%s" % msg, flush=True)
 
 
 def fetch(url, binary=False):
-    """Скачивает адрес с повторами. Возвращает (данные, сведения) или (None, None)."""
     last = None
     for attempt in range(1, RETRIES + 1):
         try:
@@ -97,7 +86,6 @@ def fetch(url, binary=False):
 
 
 def normalize(line):
-    """Приводит строку фида к имени хоста или возвращает None."""
     s = line.strip().lower()
     if not s or s[0] in "#!/;":
         return None
@@ -154,12 +142,6 @@ def encode_varint(value, out):
 
 
 def encode_hashes(hosts, bits):
-    """Отсортированные хэши, записанные разницей между соседними.
-
-    Каждые BLOCK_SIZE записей отсчёт начинается заново, а их начала
-    собраны в отдельный указатель: без него пришлось бы разворачивать
-    весь список, чтобы найти одно значение.
-    """
     values = sorted({hash_value(h, bits) for h in hosts})
     blob = bytearray()
     index = bytearray()
@@ -192,7 +174,6 @@ def write_db(path, built_day, sections):
 
 
 def previous_report():
-    """Отчёт прошлой сборки. Пустой словарь, если его нет."""
     text, _ = fetch(PREVIOUS_MANIFEST_URL)
     if text is None:
         return {}
@@ -204,11 +185,6 @@ def previous_report():
 
 
 def fingerprint(hosts):
-    """Отпечаток содержимого источника.
-
-    Считается по именам, а не по тексту: заголовки некоторых списков
-    несут дату выгрузки и менялись бы каждый день даже у замершего.
-    """
     digest = hashlib.sha256()
     for host in sorted(hosts):
         digest.update(host.encode("utf-8"))
@@ -217,10 +193,6 @@ def fingerprint(hosts):
 
 
 def feed_status(previous, mark, today):
-    """Когда содержимое источника менялось в последний раз.
-
-    Возвращает дату последнего изменения и сколько дней прошло с тех пор.
-    """
     if not previous or previous.get("fingerprint") != mark:
         return today, 0
     changed = previous.get("last_changed") or today
@@ -272,7 +244,6 @@ def collect_feeds(report, previous):
             warn("источник %s не менялся %d дней подряд — похоже, он замер"
                  % (name, frozen))
 
-        # Источник может не замереть, а обвалиться: отдать остаток вместо списка.
         before = (old_feeds.get(name) or {}).get("accepted") or 0
         if before and len(hosts) < before * SHRINK_LIMIT:
             warn("источник %s отдал %d записей вместо %d — падение на %d%%"
@@ -299,7 +270,6 @@ def load_popular():
 
 
 def find_platforms(hosts, rules, wildcards):
-    """Суффиксы общего хостинга, встречающиеся в списках."""
     platforms = set()
     for host in hosts:
         parts = host.split(".")
@@ -313,7 +283,6 @@ def find_platforms(hosts, rules, wildcards):
 
 
 def registrable(host, rules, wildcards):
-    """Домен, который кто-то зарегистрировал, с оглядкой на co.uk и vercel.app."""
     parts = host.split(".")
     for i in range(1, len(parts)):
         candidate = ".".join(parts[i:])
@@ -324,7 +293,6 @@ def registrable(host, rules, wildcards):
 
 
 def clear_popular_subdomains(membership, protected, rules, wildcards):
-    """Разбирает поддомены известных сайтов на ошибки списков и площадки."""
     groups = defaultdict(list)
     for host in membership:
         groups[registrable(host, rules, wildcards)].append(host)
@@ -401,8 +369,6 @@ def main():
     full_blob, full_count = hash_section(malicious, FULL_BITS)
     white_blob, white_count = hash_section(whitelist, WHITE_BITS)
 
-    # Зоны второго уровня вроде com.hk: без них google.com.hk выглядит как
-    # сайт в зоне com.hk, притворяющийся Google.
     suffixes = sorted(r for r in rules if r.count(".") == 1)
     log("  зон второго уровня: %d" % len(suffixes))
 
@@ -427,7 +393,6 @@ def main():
     with open(os.path.join(OUT_DIR, "manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)
 
-    # Заметное падение числа адресов — признак, что источник отдал обрезок.
     was = (previous.get("full") or {}).get("entries") or 0
     if was and full_count < was * 0.8:
         warn("адресов стало %d против %d в прошлый раз — падение на %d%%"

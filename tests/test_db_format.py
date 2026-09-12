@@ -1,10 +1,3 @@
-"""Проверка формата базы доменов.
-
-Читалка здесь повторяет ту, что уйдёт в плагин: если тест проходит,
-значит на устройстве файл прочитается так же.
-
-Запуск: python tests/test_db_format.py [путь к каталогу с базой]
-"""
 
 import hashlib
 import os
@@ -30,7 +23,6 @@ def check(condition, title):
 
 
 class Database(object):
-    """Читает файл базы и отвечает, есть ли в ней имя хоста."""
 
     def __init__(self, blob):
         if not blob.startswith(MAGIC):
@@ -75,7 +67,6 @@ class Database(object):
         index_at = 11
         data_at = index_at + index_count * INDEX_ENTRY
 
-        # Находим последний блок, первое значение которого не больше искомого.
         low, high = 0, index_count
         while low < high:
             middle = (low + high) // 2
@@ -94,7 +85,6 @@ class Database(object):
         position = data_at + start
         limit = len(raw)
         seen = 0
-        # Первая запись блока записана нулевой разницей, её уже проверили.
         while seen < block and position < limit:
             shift = 0
             delta = 0
@@ -121,7 +111,6 @@ class Database(object):
         return self.has("WHIT", host)
 
     def chain(self, host):
-        """Имя хоста и его родители, но не выше платформы общего хостинга."""
         parts = host.split(".")
         result = []
         for i in range(len(parts) - 1):
@@ -175,7 +164,6 @@ def main():
     check(mark != build_db.fingerprint(["a.example"]),
           "изменившийся список даёт другой отпечаток")
 
-    # Заголовок с датой выгрузки меняется каждый день, имена — нет.
     same = build_db.fingerprint([build_db.normalize(line) for line in
                                  ("# Last Update: 12 Sep", "a.example") if
                                  build_db.normalize(line)])
@@ -234,7 +222,6 @@ def main():
     check(found >= 2, "нашлось %d из %d образцов" % (found, len(sample)))
 
     print("== родительский домен ловится ==")
-    # Если в базе есть evil.tld, то и его поддомен должен считаться опасным.
     parent = None
     for host in sample:
         if full.is_malicious(host) and host.count(".") == 1:
@@ -252,13 +239,10 @@ def main():
     check(misses == 0, "ложных срабатываний на 20000 выдуманных: %d" % misses)
 
     print("== выборка посещаемых сайтов не тревожит ==")
-    # Список брендов в базе — это первая тысяча по посещаемости.
-    # Ни один из них не должен считаться мошенническим.
     alarms = [host for host in full.brands if full.verdict(host) != "popular"]
     check(not alarms, "тревог на тысяче посещаемых сайтов: %d %s" % (
         len(alarms), alarms[:5]))
 
-    # То же для типичных адресов, какие присылают в переписке.
     everyday = [
         "youtube.com/watch", "t.me/durov", "github.com/torvalds/linux",
         "ru.wikipedia.org/wiki/Кот", "market.yandex.ru", "avito.ru/moskva",
