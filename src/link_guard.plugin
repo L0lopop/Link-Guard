@@ -2,7 +2,7 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 __icon__ = "likguar/0"
 __app_version__ = ">=11.9.1"
 
@@ -1144,6 +1144,8 @@ DB_NAME = "full.lgdb"
 DB_NIGHT_FROM = 0
 DB_NIGHT_TO = 6
 DB_MIN_GAP = 20 * 60 * 60
+# Как часто вообще имеет смысл заглядывать, не пора ли обновиться.
+DB_TICK_GAP = 30 * 60
 # Если ночью приложение не открывали, база не должна стареть бесконечно.
 DB_STALE_DAYS = 3
 DB_MAX_BYTES = 24 * 1024 * 1024
@@ -1406,6 +1408,7 @@ class LinkGuardPlugin(BasePlugin):
         self._stats = {}
         self._sources = {}
         self._ages = {}
+        self._db_ticked = 0.0
 
         self._step("database", self._load_database)
         self._step("openUrl", self._install_open_url_hook)
@@ -1648,6 +1651,22 @@ class LinkGuardPlugin(BasePlugin):
             return True
         hour = time.localtime().tm_hour
         return DB_NIGHT_FROM <= hour < DB_NIGHT_TO
+
+    def _tick_database(self):
+        """Изредка смотрит, не пора ли обновить базу.
+
+        Плагин загружается один раз при запуске клиента, а тот может
+        работать неделями подряд. Без этого ночное окно просто не
+        наступало бы, и база обновлялась бы только по запасному правилу.
+        """
+        if not self._database_enabled():
+            return
+        now = time.time()
+        if now - getattr(self, "_db_ticked", 0) < DB_TICK_GAP:
+            return
+        self._db_ticked = now
+        if self._due_for_refresh(active_database()):
+            self._run_background(lambda: self._refresh_database(manual=False))
 
     def _load_database(self):
         """База с диска, затем при необходимости обновление из репозитория."""
@@ -2182,6 +2201,8 @@ class LinkGuardPlugin(BasePlugin):
         """Точка входа: клиент собирается открыть адрес, решаем что с ним делать."""
         if not self.get_setting("check_enabled", True):
             return
+
+        self._tick_database()
 
         index, url = self._find_url_arg(param)
         if url is None:

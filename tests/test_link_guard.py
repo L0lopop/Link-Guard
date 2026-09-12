@@ -243,6 +243,8 @@ def load_plugin(minimal=False):
 
 
 lg = load_plugin()
+# Проверка при открытии ссылки умеет качать базу, а тесты в сеть не ходят.
+lg.fetch_database = lambda name, timeout=90: None
 
 failures = []
 
@@ -1195,6 +1197,45 @@ lg.time.localtime = real_localtime
 
 check("обновления проверяются раз в шесть часов",
       lg.UPDATE_INTERVAL == 6 * 60 * 60, lg.UPDATE_INTERVAL)
+
+print("\nБаза: проверка при открытии ссылки")
+# Клиент может работать неделями без перезапуска, поэтому заглядываем
+# ещё и при переходе по ссылке — иначе ночное окно не наступает.
+started_refresh = []
+db_plugin._run_background = lambda func: started_refresh.append(func)
+db_plugin._due_for_refresh = lambda database: True
+db_plugin.set_setting("use_database", True)
+db_plugin._db_ticked = 0.0
+
+db_plugin._tick_database()
+check("первое открытие ссылки запускает проверку", len(started_refresh) == 1,
+      len(started_refresh))
+db_plugin._tick_database()
+db_plugin._tick_database()
+check("подряд идущие переходы лишнего не делают", len(started_refresh) == 1,
+      len(started_refresh))
+
+db_plugin._db_ticked = time.time() - lg.DB_TICK_GAP - 1
+db_plugin._tick_database()
+check("через положенное время заглядывает снова", len(started_refresh) == 2,
+      len(started_refresh))
+
+db_plugin.set_setting("use_database", False)
+db_plugin._db_ticked = 0.0
+db_plugin._tick_database()
+check("при выключенной базе не проверяет", len(started_refresh) == 2,
+      len(started_refresh))
+
+# Решение о самой загрузке остаётся за расписанием: частые переходы
+# не должны превращаться в частые скачивания.
+db_plugin.set_setting("use_database", True)
+db_plugin._due_for_refresh = lambda database: False
+db_plugin._db_ticked = 0.0
+db_plugin._tick_database()
+check("вне ночного окна переход к загрузке не приводит",
+      len(started_refresh) == 2, len(started_refresh))
+check("заглядываем не чаще раза в полчаса", lg.DB_TICK_GAP == 30 * 60,
+      lg.DB_TICK_GAP)
 
 print("\nСовместимость со старым SDK")
 try:
