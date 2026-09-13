@@ -1,0 +1,54 @@
+{
+  "built": "2026-09-12 02:36 UTC",
+  "feeds": {
+    "hagezi": {
+      "ok": true,
+      "accepted": 2405375,
+      "last_modified": null
+    },
+    "army": {
+      "ok": true,
+      "accepted": 154710,
+      "last_modified": "Fri, 11 Sep 2026 22:00:09 GMT"
+    },
+    "phishdb": {
+      "ok": true,
+      "accepted": 386197,
+      "last_modified": null
+    },
+    "certpl": {
+      "ok": true,
+      "accepted": 135568,
+      "last_modified": "Sat, 12 Sep 2026 02:35:07 GMT"
+    },
+    "blocklistproject": {
+      "ok": true,
+      "accepted": 190215,
+      "last_modified": null
+    },
+    "malware-filter": {
+      "ok": true,
+      "accepted": 38985,
+      "last_modified": "Sat, 12 Sep 2026 00:32:14 GMT"
+    },
+    "urlhaus": {
+      "ok": true,
+      "accepted": 8443,
+      "last_modified": "Sat, 12 Sep 2026 02:30:55 GMT"
+    }
+  },
+  "full": {
+    "entries": 2984804,
+    "bytes": 9211242,
+    "hash_bits": 40
+  },
+  "whitelist": {
+    "entries": 50000,
+    "hash_bits": 36
+  },
+  "brands": 1000,
+  "platforms": 2635,
+  "suffixes": 5333,
+  "removed_by_whitelist": 184,
+  "removed_popular_subdomains": 3762
+}
