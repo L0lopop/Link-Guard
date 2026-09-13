@@ -142,8 +142,9 @@ def main():
 
     print("== чтение файла ==")
     full = Database(open(full_path, "rb").read())
-    check(set(full.sections) == {"MALW", "WHIT", "BRND", "TLDR", "PLAT", "SUFX"},
-          "все шесть разделов на месте")
+    check(set(full.sections) == {"MALW", "WHIT", "BRND", "TLDR", "PLAT",
+                                 "SUFX", "FR10", "FR30"},
+          "все восемь разделов на месте: %s" % sorted(full.sections))
     check(full.built_day > 20000, "дата сборки записана")
     check(len(full.brands) == 1000, "тысяча брендов на месте")
     check(len(full.platforms) > 1000, "платформы общего хостинга собраны")
@@ -262,11 +263,29 @@ def main():
     print("  %.0f мкс на проверку по полной базе" % per_call)
     check(per_call < 2000, "проверка укладывается в 2 мс")
 
-    ranks = full.tld_ranks()
-    print("  худшие зоны: %s" % ", ".join(
-        "%s(%d)" % (t, c) for t, c in sorted(
-            ranks.items(), key=lambda kv: -kv[1])[:5]))
-    check(ranks.get("xyz", 0) > 10000, "рейтинг зон посчитан")
+    print("== репутация зон ==")
+    zones = {}
+    for line in full._lines("TLDR"):
+        parts = line.split(" ")
+        if len(parts) == 2 and parts[1].isdigit():
+            zones[parts[0]] = int(parts[1])
+    worst = sorted(z for z, lvl in zones.items() if lvl == 3)
+    print("  худших зон: %d — %s" % (len(worst), ", ".join(worst[:10])))
+    check(zones.get("xyz") == 3, "xyz отмечена как худшая: %s" % zones.get("xyz"))
+    check(zones.get("com", 0) == 0, "com не отмечена: %s" % zones.get("com"))
+    check(zones.get("ru", 0) == 0, "ru не отмечена: %s" % zones.get("ru"))
+    check(all(lvl in (2, 3) for lvl in zones.values()),
+          "уровни только 2 и 3: %s" % sorted(set(zones.values())))
+
+    print("== свежерегистрированные домены ==")
+    fresh10 = struct.unpack(">I", full.sections["FR10"][1:5])[0]
+    fresh30 = struct.unpack(">I", full.sections["FR30"][1:5])[0]
+    print("  младше 10 дней: %d, от 10 до 30 дней: %d" % (fresh10, fresh30))
+    check(1000 < fresh10 < 100000, "список за 10 дней разумного размера")
+    check(1000 < fresh30 < 300000, "список за 30 дней разумного размера")
+    for host in ("google.com", "sberbank.ru", "github.com"):
+        check(not full.has("FR10", host) and not full.has("FR30", host),
+              "%s не считается свежим" % host)
 
     print()
     if failures:

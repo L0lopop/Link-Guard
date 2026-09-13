@@ -1027,14 +1027,25 @@ BAD = ["moshennik.top", "sber-oplata.xyz", "phish.pages.dev"]
 GOOD = ["primer-horoshiy-sayt-s-dlinnym-imenem.top"]
 
 
-def make_database(bad=BAD, good=GOOD, platforms=("pages.dev",)):
+FRESH10 = ["sber-bonus-new.top"]
+FRESH30 = ["oplata-dostavki-new.ru"]
+ZONES = {"xyz": 3, "shop": 2}
+
+
+def make_database(bad=BAD, good=GOOD, platforms=("pages.dev",),
+                  fresh10=FRESH10, fresh30=FRESH30, zones=ZONES):
     malw, _ = build_db.hash_section(bad, build_db.FULL_BITS)
     whit, _ = build_db.hash_section(good, build_db.WHITE_BITS)
+    fr10, _ = build_db.hash_section(fresh10, build_db.FULL_BITS)
+    fr30, _ = build_db.hash_section(fresh30, build_db.FULL_BITS)
+    zone_text = "\n".join("%s %d" % (z, lvl) for z, lvl in sorted(zones.items()))
     sections = [
         ("MALW", malw),
         ("WHIT", whit),
+        ("TLDR", zone_text.encode("utf-8")),
+        ("FR10", fr10),
+        ("FR30", fr30),
         ("BRND", b"example.com"),
-        ("TLDR", b"top 100"),
         ("PLAT", "\n".join(platforms).encode("utf-8")),
     ]
     body = b"".join(build_db.section(tag, payload) for tag, payload in sections)
@@ -1067,6 +1078,136 @@ check("платформа целиком не блокируется",
 v = lg.analyze("https://primer-horoshiy-sayt-s-dlinnym-imenem.top/")
 check("у посещаемого сайта мелкие придирки сняты", v.risk == lg.INFO, v.flags)
 
+print("\nИмя банка с приставкой")
+for host in ("sberbank-shop.ru", "sberbankshop.com", "tinkoff-oplata.top",
+             "vtb-online.info", "gosuslugi-vyplaty.shop", "wildberries-sale.ru",
+             "ozon-bonus.store", "yandex-dostavka.site", "avito-dostavka.top",
+             "telegram-premium.shop", "whatsapp-web.online"):
+    v = lg.analyze("https://%s/" % host)
+    named = [text for _, text in v.flags if "не принадлежит" in text]
+    check("%s — высокий риск" % host, v.risk == lg.HIGH and named, v.flags)
+
+for host in ("sberbank.ru", "tinkoff.ru", "gosuslugi.ru", "ozon.ru",
+             "wildberries.ru", "yandex.ru", "avito.ru", "telegram.org"):
+    v = lg.analyze("https://%s/" % host)
+    check("%s не тронут" % host,
+          not any("не принадлежит" in text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://steampowered-fan.ru/")
+check("чужое имя с приставкой ловится даже у безобидного с виду сайта",
+      any("steampowered" in text for _, text in v.flags), v.flags)
+
+for host in ("pineapple-shop.ru", "moy-magazin.shop",
+             "kakoy-to-sayt.ru", "post-service.ru", "mail-arhiv.ru"):
+    v = lg.analyze("https://%s/" % host)
+    check("%s не считается подделкой" % host,
+          not any("не принадлежит" in text for _, text in v.flags), v.flags)
+
+check("имя ровно как у бренда, но в другой зоне, правилом не ловится",
+      lg.brand_with_extra("sberbank.com", lg.BRANDS, lg.BRAND_LIST) is None,
+      lg.brand_with_extra("sberbank.com", lg.BRANDS, lg.BRAND_LIST))
+check("короткие названия ловятся только целым словом",
+      lg.brand_with_extra("vtb-vhod.ru", lg.BRANDS, lg.BRAND_LIST) == "vtb"
+      and lg.brand_with_extra("montblanc.ru", lg.BRANDS, lg.BRAND_LIST) is None)
+check("список брендов отсортирован один раз, а не на каждой ссылке",
+      lg.BRAND_LIST == sorted(lg.BRANDS) and isinstance(lg.BRAND_LIST, list))
+
+print("\nДоверенные домены с кириллицей")
+IDN_URL = "https://xn--80aswg.xn--p1ai/vhod"
+idn = lg.analyze(IDN_URL)
+check("punycode распознан", idn.host == "xn--80aswg.xn--p1ai"
+      and idn.display_host == "сайт.рф", (idn.host, idn.display_host))
+
+shown_form = lg.registrable(idn.display_host)
+check("доверие в читаемом виде работает",
+      not lg.analyze(IDN_URL, whitelist={shown_form}).flags,
+      lg.analyze(IDN_URL, whitelist={shown_form}).flags)
+check("доверие в виде punycode тоже работает",
+      not lg.analyze(IDN_URL, whitelist={idn.host}).flags,
+      lg.analyze(IDN_URL, whitelist={idn.host}).flags)
+
+for typed, expect in (("сайт.рф", "сайт.рф"),
+                      ("xn--80aswg.xn--p1ai", "сайт.рф"),
+                      ("Пример.РФ", "пример.рф"),
+                      ("https://сайт.рф/stranica", "сайт.рф"),
+                      ("не домен", ""),
+                      ("", "")):
+    check("поле ввода: %r -> %r" % (typed, expect),
+          lg.normalize_domain(typed) == expect, lg.normalize_domain(typed))
+
+trusting = lg.LinkGuardPlugin()
+trusting.on_plugin_load()
+trusting._toast = lambda text: None
+trusting._trust_domain(lg.registrable(idn.display_host))
+check("домен попал в список доверенных",
+      "сайт.рф" in trusting._whitelist(), trusting._whitelist())
+check("и ссылка после этого не тревожит",
+      not lg.analyze(IDN_URL, whitelist=trusting._whitelist()).flags,
+      lg.analyze(IDN_URL, whitelist=trusting._whitelist()).flags)
+
+print("\nБыстрый отсев не теряет опечатки")
+missed = []
+for brand in sorted(lg.BRANDS):
+    head, _, zone = brand.partition(".")
+    if len(head) < 5:
+        continue
+    variants = (
+        head[:-1] + "." + zone,
+        head + head[-1] + "." + zone,
+        head[:2] + head[3:] + "." + zone,
+        head[:-2] + head[-1] + head[-2] + "." + zone,
+    )
+    for variant in variants:
+        if variant in lg.BRANDS or variant == brand:
+            continue
+        found = any(brand.split(".")[0] in text
+                    for _, text in lg.analyze("https://%s/" % variant).flags)
+        if not found:
+            missed.append((brand, variant))
+check("однобуквенные опечатки во всех брендах ловятся: пропущено %d"
+      % len(missed), not missed, missed[:4])
+
+print("\nРепутация зон из базы")
+check("уровни зон прочитаны", database.zones == ZONES, database.zones)
+v = lg.analyze("https://kakoy-to-sayt.xyz/")
+check("худшая зона даёт средний риск", v.risk == lg.MEDIUM, v.flags)
+check("в разборе названа зона",
+      any(lg.phrase("f_tld_worst", "xyz") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.shop/")
+check("зона попроще сама по себе молчит", not v.flags, v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.shop/oplata/podtverdite")
+check("но вместе с другой находкой добавляет замечание",
+      any(lg.phrase("f_tld", "shop") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.ru/")
+check("обычная зона замечаний не даёт", not v.flags, v.flags)
+
+v = lg.analyze("https://kakoy-to-sayt.zip/")
+check("зона из встроенного списка работает, когда в базе её нет",
+      v.risk == lg.LOW, v.flags)
+
+print("\nСвежерегистрированные домены")
+v = lg.analyze("https://sber-bonus-new.top/")
+check("домен младше десяти дней тревожит",
+      any(lg.phrase("f_fresh_10") == text for _, text in v.flags), v.flags)
+check("и поднимает риск до высокого вместе с прочим",
+      v.risk == lg.HIGH, v.flags)
+
+v = lg.analyze("https://lk.sber-bonus-new.top/vhod")
+check("поддомен свежего домена тоже тревожит",
+      any(lg.phrase("f_fresh_10") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://oplata-dostavki-new.ru/")
+check("домен младше месяца отмечается мягче",
+      any(lg.phrase("f_fresh_30") == text for _, text in v.flags), v.flags)
+
+v = lg.analyze("https://staryy-sayt-obychnyy.ru/")
+check("давно живущий домен не трогаем",
+      not any(lg.phrase("f_fresh_10") == text or lg.phrase("f_fresh_30") == text
+              for _, text in v.flags), v.flags)
+
 lg.install_database(None)
 v = lg.analyze("https://moshennik.top/vhod")
 check("без базы проверка по ней не идёт",
@@ -1092,21 +1233,105 @@ if os.path.exists(REAL_DB):
     check("разбор укладывается в 40 мс", per_call < 40, per_call)
 
     alarms = []
-    for host in sorted(real.brands)[:400]:
+    for host in sorted(real.brands):
         verdict = lg.analyze("https://%s/" % host)
         if verdict.risk == lg.HIGH:
             alarms.append((host, verdict.flags))
-    check("сами бренды не считаются подделками: тревог %d" % len(alarms),
-          not alarms, alarms[:3])
+    check("тысяча посещаемых сайтов не считается подделками: тревог %d"
+          % len(alarms), not alarms, alarms[:3])
 
     everyday = ["ya.ru", "dzen.ru", "habr.com", "rutracker.org", "kinopoisk.ru",
                 "2gis.ru", "sravni.ru", "banki.ru", "auto.ru", "cian.ru"]
     noisy = [h for h in everyday if lg.analyze("https://%s/" % h).risk == lg.HIGH]
     check("обычные сайты не тревожат: %s" % noisy, not noisy)
+
+    fresh_words = (lg.phrase("f_fresh_10"), lg.phrase("f_fresh_30"))
+    mistaken = []
+    for host in sorted(real.brands) + everyday:
+        for _, text in lg.analyze("https://%s/" % host).flags:
+            if text in fresh_words:
+                mistaken.append(host)
+                break
+    check("посещаемые сайты не считаются свежими: %d" % len(mistaken),
+          not mistaken, mistaken[:5])
+
+    zones_seen = sum(1 for _, text in
+                     lg.analyze("https://kakoy-to-novyy-sayt.digital/").flags
+                     if text == lg.phrase("f_tld_worst", "digital"))
+    check("репутация зон работает на настоящей базе", zones_seen == 1,
+          lg.analyze("https://kakoy-to-novyy-sayt.digital/").flags)
+
+    with_subdomains = [
+        "apple.stackexchange.com", "android.stackexchange.com",
+        "money.yandex.ru", "market.yandex.ru", "cloud.mail.ru",
+        "pay.google.com", "drive.google.com", "support.apple.com",
+        "music.apple.com", "docs.google.com", "web.whatsapp.com",
+        "online.sberbank.ru", "passport.yandex.ru", "outlook.office.com",
+        "login.microsoftonline.com", "static.rutube.ru", "id.vk.com",
+    ]
+    noisy = [(h, lg.analyze("https://%s/" % h).flags) for h in with_subdomains
+             if lg.analyze("https://%s/" % h).risk != lg.INFO]
+    check("известные сайты с поддоменами молчат: тревог %d" % len(noisy),
+          not noisy, noisy[:3])
+
+    v = lg.analyze("https://telegram.org.ru/")
+    check("а подозрительное имя в чужой зоне по-прежнему ловится",
+          v.risk == lg.HIGH, v.flags)
+
     lg.install_database(None)
 else:
     check("настоящая база найдена для проверки брендов", True,
           "пропущено: нет %s" % REAL_DB)
+
+print("\nЗабытые копии базы убираются")
+sweep_root = tempfile.mkdtemp(prefix="link_guard_sweep_")
+folders = [os.path.join(sweep_root, name) for name in ("plugins", "cache", "docs")]
+for folder in folders:
+    os.makedirs(folder)
+    with open(os.path.join(folder, lg.DB_FILE_NAME), "wb") as handle:
+        handle.write(b"LGDB starye dannye")
+
+sweeper = lg.LinkGuardPlugin()
+sweeper.on_plugin_load()
+sweeper._writable_dirs = lambda: folders
+check("рабочий файл лежит в первом каталоге",
+      sweeper._database_path() == os.path.join(folders[0], lg.DB_FILE_NAME))
+check("копии в других каталогах найдены", sweeper._sweep_database_copies() == 2)
+check("рабочий файл на месте",
+      os.path.exists(os.path.join(folders[0], lg.DB_FILE_NAME)))
+check("забытые копии удалены",
+      not any(os.path.exists(os.path.join(f, lg.DB_FILE_NAME))
+              for f in folders[1:]))
+check("повторная уборка ничего не находит",
+      sweeper._sweep_database_copies() == 0)
+
+sweeper._writable_dirs = lambda: []
+check("без каталогов уборка не падает", sweeper._sweep_database_copies() == 0)
+check("и путь к базе не выдумывается", sweeper._database_path() is None)
+
+print("\nСтарая база без новых разделов")
+old_sections = [
+    ("MALW", build_db.hash_section(BAD, build_db.FULL_BITS)[0]),
+    ("WHIT", build_db.hash_section(GOOD, build_db.WHITE_BITS)[0]),
+    ("BRND", b"example.com"),
+    ("PLAT", b"pages.dev"),
+]
+old_body = b"".join(build_db.section(t, p) for t, p in old_sections)
+old_blob = b"LGDB" + struct.pack(">BIB", 1, 20400, len(old_sections)) + old_body
+old_db = lg.DomainDatabase(old_blob)
+lg.install_database(old_db)
+check("старая база читается", old_db.total == len(BAD), old_db.total)
+check("зон в ней нет", old_db.zones == {}, old_db.zones)
+v = lg.analyze("https://moshennik.top/vhod")
+check("мошеннический домен по-прежнему ловится", v.risk == lg.HIGH, v.flags)
+v = lg.analyze("https://kakoy-to-sayt.top/")
+check("зона берётся из встроенного списка",
+      any(lg.phrase("f_tld", "top") == t for _, t in v.flags), v.flags)
+v = lg.analyze("https://kakoy-to-sayt.digital/")
+check("без данных о зоне тревоги нет", not v.flags, v.flags)
+v = lg.analyze("https://sberbank-shop.ru/")
+check("имя с приставкой не зависит от базы", v.risk == lg.HIGH, v.flags)
+lg.install_database(None)
 
 print("\nБаза: порченые файлы")
 for broken, title in (

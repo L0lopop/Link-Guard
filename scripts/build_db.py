@@ -31,6 +31,37 @@ FEEDS = [
 TRANCO_URL = "https://tranco-list.eu/top-1m.csv.zip"
 PSL_URL = "https://publicsuffix.org/list/public_suffix_list.dat"
 
+FRESH_FEEDS = (
+    ("FR10", "https://raw.githubusercontent.com/cenk/nrd/main/nrd-last-10-days.txt"),
+    ("FR30", "https://raw.githubusercontent.com/cenk/nrd/main/nrd-last-30-days.txt"),
+)
+
+ZONE_MIN_BAD = 200
+ZONE_BAD = 25
+ZONE_WORST = 50
+ZONE_REPORT = 40
+
+BRAND_MARKERS = (
+    "sber", "tinkoff", "tbank", "vtb", "alfabank", "alfa-bank", "gosuslug",
+    "wildberries", "ozon", "yandex", "mailru", "mail-ru", "vkontakte", "vk-com",
+    "telegram", "tgram", "whatsapp", "binance", "bybit", "metamask", "paypal",
+    "apple", "icloud", "google", "microsoft", "outlook", "netflix", "steam",
+    "roblox", "epicgames", "amazon", "aliexpress", "dns-shop", "mvideo",
+    "eldorado", "rzd", "aeroflot", "pochta", "avito", "drom", "coinbase",
+    "trustwallet", "ledger", "tronlink", "instagram", "facebook", "tiktok",
+    "discord", "twitch", "raiffeisen", "psbank", "gazprombank", "sovcombank",
+    "yoomoney", "sbermarket", "samokat", "vkusvill", "rutube", "citilink",
+    "lamoda", "sportmaster", "megafon", "beeline", "rostelecom",
+)
+
+BAIT_MARKERS = (
+    "oplat", "dostavk", "posylk", "shtraf", "vozvrat", "viplat", "vyplat",
+    "kompensac", "podtverd", "razblok", "verifik", "bonus", "prize", "podarok",
+    "winner", "login", "signin", "sign-in", "secure", "account", "wallet",
+    "airdrop", "claim", "support", "update", "confirm", "recovery", "unlock",
+    "refund", "invoice", "payment", "banking", "verify", "restore",
+)
+
 WHITELIST_TOP = 50000
 BRAND_TOP = 1000
 
@@ -269,6 +300,34 @@ def load_popular():
     return popular
 
 
+def zone_levels(bad, good):
+    levels = {}
+    for zone, count in bad.items():
+        if count < ZONE_MIN_BAD:
+            continue
+        ratio = count / (good.get(zone, 0) + 1)
+        if ratio >= ZONE_WORST:
+            levels[zone] = 3
+        elif ratio >= ZONE_BAD:
+            levels[zone] = 2
+    return levels
+
+
+def fresh_hosts(url, skip):
+    text, _ = fetch(url)
+    if text is None:
+        return None
+    picked = set()
+    for line in text.splitlines():
+        host = normalize(line)
+        if not host or host in skip:
+            continue
+        if (any(m in host for m in BRAND_MARKERS)
+                or any(m in host for m in BAIT_MARKERS)):
+            picked.add(host)
+    return picked
+
+
 def find_platforms(hosts, rules, wildcards):
     platforms = set()
     for host in hosts:
@@ -357,17 +416,40 @@ def main():
         log("ОШИБКА: база подозрительно маленькая, публиковать не будем")
         return 1
 
-    tld_counts = Counter(h.rsplit(".", 1)[-1] for h in malicious)
-    tld_lines = ["%s %d" % (tld, count) for tld, count in tld_counts.most_common(400)]
+    bad_zones = Counter(h.rsplit(".", 1)[-1] for h in malicious)
+    good_zones = Counter(h.rsplit(".", 1)[-1] for h in popular)
+    levels = zone_levels(bad_zones, good_zones)
+    tld_lines = ["%s %d" % (zone, level) for zone, level in sorted(levels.items())]
+    worst = sorted(((bad_zones[z] / (good_zones.get(z, 0) + 1)), z)
+                   for z in levels if levels[z] == 3)
+    log("  зон с дурной репутацией: %d, из них худших: %d" % (
+        len(levels), len(worst)))
+    log("    %s" % ", ".join("%s (%.0f к 1)" % (z, r)
+                             for r, z in sorted(worst, reverse=True)[:8]))
 
     platforms = find_platforms(malicious, rules, wildcards) | busy
     log("  платформ общего хостинга: %d" % len(platforms))
+
+    log("== свежерегистрированные домены ==")
+    skip = set(malicious) | protected
+    fresh = {}
+    for tag, url in FRESH_FEEDS:
+        picked = fresh_hosts(url, skip)
+        if picked is None:
+            warn("список свежих доменов %s не скачался" % tag)
+            fresh[tag] = set()
+            continue
+        fresh[tag] = picked
+        log("  %s: %d с брендом или приманкой в имени" % (tag, len(picked)))
+    fresh["FR30"] -= fresh["FR10"]
 
     brands = popular[:BRAND_TOP]
     built_day = int(time.time() // 86400)
 
     full_blob, full_count = hash_section(malicious, FULL_BITS)
     white_blob, white_count = hash_section(whitelist, WHITE_BITS)
+    fresh10_blob, fresh10_count = hash_section(fresh["FR10"], FULL_BITS)
+    fresh30_blob, fresh30_count = hash_section(fresh["FR30"], FULL_BITS)
 
     suffixes = sorted(r for r in rules if r.count(".") == 1)
     log("  зон второго уровня: %d" % len(suffixes))
@@ -379,14 +461,28 @@ def main():
         ("TLDR", "\n".join(tld_lines).encode("utf-8")),
         ("PLAT", "\n".join(sorted(platforms)).encode("utf-8")),
         ("SUFX", "\n".join(suffixes).encode("utf-8")),
+        ("FR10", fresh10_blob),
+        ("FR30", fresh30_blob),
     ])
+
+    zone_report = []
+    for zone, level in sorted(levels.items(),
+                              key=lambda kv: -bad_zones[kv[0]] / (good_zones.get(kv[0], 0) + 1)):
+        zone_report.append("%s level=%d плохих=%d известных=%d" % (
+            zone, level, bad_zones[zone], good_zones.get(zone, 0)))
+        if len(zone_report) >= ZONE_REPORT:
+            break
 
     report.update({
         "full": {"entries": full_count, "bytes": full_size, "hash_bits": FULL_BITS},
         "whitelist": {"entries": white_count, "hash_bits": WHITE_BITS},
+        "fresh_10_days": fresh10_count,
+        "fresh_30_days": fresh30_count,
         "brands": len(brands),
         "platforms": len(platforms),
         "suffixes": len(suffixes),
+        "zones": len(levels),
+        "worst_zones": zone_report,
         "removed_by_whitelist": len(removed),
         "removed_popular_subdomains": len(dropped),
     })
