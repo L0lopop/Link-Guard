@@ -1233,6 +1233,32 @@ else:
     check("настоящая база найдена для проверки брендов", True,
           "пропущено: нет %s" % REAL_DB)
 
+print("\nЗабытые копии базы убираются")
+sweep_root = tempfile.mkdtemp(prefix="link_guard_sweep_")
+folders = [os.path.join(sweep_root, name) for name in ("plugins", "cache", "docs")]
+for folder in folders:
+    os.makedirs(folder)
+    with open(os.path.join(folder, lg.DB_FILE_NAME), "wb") as handle:
+        handle.write(b"LGDB starye dannye")
+
+sweeper = lg.LinkGuardPlugin()
+sweeper.on_plugin_load()
+sweeper._writable_dirs = lambda: folders
+check("рабочий файл лежит в первом каталоге",
+      sweeper._database_path() == os.path.join(folders[0], lg.DB_FILE_NAME))
+check("копии в других каталогах найдены", sweeper._sweep_database_copies() == 2)
+check("рабочий файл на месте",
+      os.path.exists(os.path.join(folders[0], lg.DB_FILE_NAME)))
+check("забытые копии удалены",
+      not any(os.path.exists(os.path.join(f, lg.DB_FILE_NAME))
+              for f in folders[1:]))
+check("повторная уборка ничего не находит",
+      sweeper._sweep_database_copies() == 0)
+
+sweeper._writable_dirs = lambda: []
+check("без каталогов уборка не падает", sweeper._sweep_database_copies() == 0)
+check("и путь к базе не выдумывается", sweeper._database_path() is None)
+
 print("\nСтарая база без новых разделов")
 old_sections = [
     ("MALW", build_db.hash_section(BAD, build_db.FULL_BITS)[0]),

@@ -1237,6 +1237,7 @@ DB_FORMAT = 1
 DB_HEADER = 10
 DB_INDEX_ENTRY = 12
 DB_HASH_SECTIONS = ("MALW", "WHIT", "FR10", "FR30")
+DB_FILE_NAME = "link_guard_domains.lgdb"
 
 
 class DomainDatabase:
@@ -1778,7 +1779,21 @@ class LinkGuardPlugin(BasePlugin):
 
     def _database_path(self):
         folders = self._writable_dirs()
-        return os.path.join(folders[0], "link_guard_domains.lgdb") if folders else None
+        return os.path.join(folders[0], DB_FILE_NAME) if folders else None
+
+    def _sweep_database_copies(self):
+        swept = 0
+        for folder in self._writable_dirs()[1:]:
+            stale = os.path.join(folder, DB_FILE_NAME)
+            try:
+                if os.path.exists(stale):
+                    os.remove(stale)
+                    swept += 1
+            except Exception as e:
+                self._debug("db: забытая копия не удалена: %s" % e)
+        if swept:
+            self._debug("db: убрано забытых копий: %d" % swept)
+        return swept
 
     def _moment(self, key):
         try:
@@ -1817,6 +1832,7 @@ class LinkGuardPlugin(BasePlugin):
         if not self._database_enabled():
             install_database(None)
             return
+        self._sweep_database_copies()
         path = self._database_path()
         database = read_database(path)
         if database is not None:
