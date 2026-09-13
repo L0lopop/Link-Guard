@@ -1004,7 +1004,8 @@ def normalize_domain(text):
     value = value.split(":")[0].strip().strip(".").lstrip("*.")
     if not value or " " in value:
         return ""
-    if not re.fullmatch(r"[a-z0-9\-._~Ѐ-ӿ]+\.[a-zЀ-ӿ]{2,}", value):
+    if not re.fullmatch(r"[a-z0-9\-._~Ѐ-ӿ]+\.(?:[a-zЀ-ӿ]{2,}|xn--[a-z0-9\-]{2,})",
+                        value):
         return ""
     return decode_idna(value)
 
@@ -1068,7 +1069,10 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
         return verdict
 
     reg = registrable(host)
-    if reg in whitelist or host in whitelist:
+    shown_host = verdict.display_host
+    shown_reg = reg if shown_host == host else registrable(shown_host)
+    if (reg in whitelist or host in whitelist
+            or shown_reg in whitelist or shown_host in whitelist):
         verdict.cleaned, verdict.removed_params = clean_url(url, aggressive)
         return verdict
 

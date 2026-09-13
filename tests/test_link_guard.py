@@ -1112,6 +1112,39 @@ check("короткие названия ловятся только целым 
 check("список брендов отсортирован один раз, а не на каждой ссылке",
       lg.BRAND_LIST == sorted(lg.BRANDS) and isinstance(lg.BRAND_LIST, list))
 
+print("\nДоверенные домены с кириллицей")
+IDN_URL = "https://xn--80aswg.xn--p1ai/vhod"
+idn = lg.analyze(IDN_URL)
+check("punycode распознан", idn.host == "xn--80aswg.xn--p1ai"
+      and idn.display_host == "сайт.рф", (idn.host, idn.display_host))
+
+shown_form = lg.registrable(idn.display_host)
+check("доверие в читаемом виде работает",
+      not lg.analyze(IDN_URL, whitelist={shown_form}).flags,
+      lg.analyze(IDN_URL, whitelist={shown_form}).flags)
+check("доверие в виде punycode тоже работает",
+      not lg.analyze(IDN_URL, whitelist={idn.host}).flags,
+      lg.analyze(IDN_URL, whitelist={idn.host}).flags)
+
+for typed, expect in (("сайт.рф", "сайт.рф"),
+                      ("xn--80aswg.xn--p1ai", "сайт.рф"),
+                      ("Пример.РФ", "пример.рф"),
+                      ("https://сайт.рф/stranica", "сайт.рф"),
+                      ("не домен", ""),
+                      ("", "")):
+    check("поле ввода: %r -> %r" % (typed, expect),
+          lg.normalize_domain(typed) == expect, lg.normalize_domain(typed))
+
+trusting = lg.LinkGuardPlugin()
+trusting.on_plugin_load()
+trusting._toast = lambda text: None
+trusting._trust_domain(lg.registrable(idn.display_host))
+check("домен попал в список доверенных",
+      "сайт.рф" in trusting._whitelist(), trusting._whitelist())
+check("и ссылка после этого не тревожит",
+      not lg.analyze(IDN_URL, whitelist=trusting._whitelist()).flags,
+      lg.analyze(IDN_URL, whitelist=trusting._whitelist()).flags)
+
 print("\nБыстрый отсев не теряет опечатки")
 missed = []
 for brand in sorted(lg.BRANDS):
