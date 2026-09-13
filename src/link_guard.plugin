@@ -412,7 +412,7 @@ STRINGS = {
 
 LANG = "ru"
 
-DEBUG_BUILD = True
+DEBUG_BUILD = False
 LOG_MAX = 400
 
 
@@ -1124,7 +1124,7 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
                                         plural_form(phrase("unit_char"), dist)))
                 break
 
-    if reg not in known_brands:
+    if reg not in known_brands and not known_good:
         labels = shown.split(".")
         for brand in BRAND_LIST:
             head = brand.split(".")[0]

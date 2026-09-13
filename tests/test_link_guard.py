@@ -1228,6 +1228,23 @@ if os.path.exists(REAL_DB):
     check("репутация зон работает на настоящей базе", zones_seen == 1,
           lg.analyze("https://kakoy-to-novyy-sayt.digital/").flags)
 
+    with_subdomains = [
+        "apple.stackexchange.com", "android.stackexchange.com",
+        "money.yandex.ru", "market.yandex.ru", "cloud.mail.ru",
+        "pay.google.com", "drive.google.com", "support.apple.com",
+        "music.apple.com", "docs.google.com", "web.whatsapp.com",
+        "online.sberbank.ru", "passport.yandex.ru", "outlook.office.com",
+        "login.microsoftonline.com", "static.rutube.ru", "id.vk.com",
+    ]
+    noisy = [(h, lg.analyze("https://%s/" % h).flags) for h in with_subdomains
+             if lg.analyze("https://%s/" % h).risk != lg.INFO]
+    check("известные сайты с поддоменами молчат: тревог %d" % len(noisy),
+          not noisy, noisy[:3])
+
+    v = lg.analyze("https://telegram.org.ru/")
+    check("а подозрительное имя в чужой зоне по-прежнему ловится",
+          v.risk == lg.HIGH, v.flags)
+
     lg.install_database(None)
 else:
     check("настоящая база найдена для проверки брендов", True,
