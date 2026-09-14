@@ -884,6 +884,8 @@ def levenshtein(left, right):
 
 BRAND_CORE_MIN = 3
 BRAND_GLUED_MIN = 6
+HOST_MAX = 253
+LABELS_MAX = 40
 BRAND_LIST = sorted(BRANDS)
 
 
@@ -1072,6 +1074,11 @@ def analyze(url, aggressive=False, whitelist=(), anchor=None):
 
     if not host:
         verdict.add(MEDIUM, phrase("f_nodomain"))
+        return verdict
+
+    if len(host) > HOST_MAX or host.count(".") > LABELS_MAX:
+        verdict.add(HIGH, phrase("f_unparsable"))
+        verdict.cleaned, verdict.removed_params = clean_url(url, aggressive)
         return verdict
 
     reg = registrable(host)

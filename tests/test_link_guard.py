@@ -1514,6 +1514,32 @@ check("у пустого журнала понятный текст",
       db_plugin._log_text() == lg.phrase("log_empty"))
 db_plugin.set_setting("debug_log", False)
 
+print("\nНелепые адреса не подвешивают разбор")
+started_at = time.time()
+for host, name in (
+    ("." * 9000 + "com", "девять тысяч точек"),
+    ("www." * 3000, "три тысячи www"),
+    ("a" * 9000 + ".com", "очень длинное имя"),
+    (".".join("x" for _ in range(500)) + ".com", "пятьсот меток"),
+):
+    v = lg.analyze("https://%s/stranica" % host)
+    check("%s — отказ, а не разбор" % name,
+          any(lg.phrase("f_unparsable") == t for _, t in v.flags), v.flags)
+spent_ms = (time.time() - started_at) * 1000
+check("на все четыре ушло меньше 50 мс: %.0f" % spent_ms, spent_ms < 50, spent_ms)
+
+v = lg.analyze("https://a.b.c.d.example.com/x")
+check("обычная глубокая цепочка разбирается",
+      not any(lg.phrase("f_unparsable") == t for _, t in v.flags), v.flags)
+check("и по-прежнему считается глубокой",
+      any(lg.phrase("f_deep") == t for _, t in v.flags), v.flags)
+
+v = lg.analyze("https://primer.example.com/" + "a" * 5000)
+check("длинный путь при нормальном домене не мешает",
+      not any(lg.phrase("f_unparsable") == t for _, t in v.flags), v.flags)
+
+check("предел длины имени — как в DNS", lg.HOST_MAX == 253, lg.HOST_MAX)
+
 print("\nКнопка на репозиторий")
 repo_plugin = lg.LinkGuardPlugin()
 repo_plugin.on_plugin_load()
