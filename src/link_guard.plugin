@@ -2,9 +2,9 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 __icon__ = "likguar/0"
-__app_version__ = ">=11.9.1"
+__app_version__ = ">=12.1.1"
 
 import hashlib
 import os
@@ -179,6 +179,7 @@ STRINGS = {
         "upd_none": "Обновлений нет · установлена %s",
         "upd_ahead": "У вас сборка новее опубликованной: %s (в каталоге %s)",
         "upd_whats_new": "Что нового:",
+        "upd_client_old": "Новая версия требует клиент %s или новее — обновите приложение",
         "upd_install": "Перейти на новую версию",
         "upd_downloading": "Скачиваю обновление…",
         "upd_ready": "Подтвердите установку — плагин заменит себя новой версией",
@@ -329,6 +330,7 @@ STRINGS = {
         "upd_none": "No updates · you have %s",
         "upd_ahead": "Your build is newer than the published one: %s (catalog has %s)",
         "upd_whats_new": "What is new:",
+        "upd_client_old": "The new version needs client %s or newer — update the app",
         "upd_install": "Get the new version",
         "upd_downloading": "Downloading the update…",
         "upd_ready": "Confirm the install — the plugin will replace itself",
@@ -1467,6 +1469,29 @@ def domain_age_days(domain, timeout=8):
     return None
 
 
+def client_version():
+    if find_class is None:
+        return ""
+    try:
+        build = find_class("org.telegram.messenger.BuildVars")
+        if build is None:
+            return ""
+        value = getattr(build, "BUILD_VERSION_STRING", "") or ""
+        return str(value)
+    except Exception as e:
+        log("LinkGuard: client version unknown: %s" % e)
+        return ""
+
+
+def client_too_old(required):
+    if not required:
+        return False
+    running = client_version()
+    if not running:
+        return False
+    return parse_version(running) < parse_version(required)
+
+
 def parse_version(text):
     parts = []
     for chunk in str(text).split(".")[:3]:
@@ -1977,6 +2002,15 @@ class LinkGuardPlugin(BasePlugin):
             return
 
         remote = str(info.get("version", ""))
+        needed = str(info.get("min_app_version", "") or "")
+        if client_too_old(needed):
+            self._debug("update: %s требует клиент %s, а стоит %s"
+                        % (remote, needed, client_version()))
+            if manual:
+                run_on_ui_thread(lambda: self._toast(
+                    phrase("upd_client_old", needed)))
+            return
+
         local, published = parse_version(__version__), parse_version(remote)
         if published <= local:
             if manual:

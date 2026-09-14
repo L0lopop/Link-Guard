@@ -1514,6 +1514,43 @@ check("у пустого журнала понятный текст",
       db_plugin._log_text() == lg.phrase("log_empty"))
 db_plugin.set_setting("debug_log", False)
 
+print("\nМинимальная версия клиента")
+check("плагин требует 12.1.1", lg.__app_version__ == ">=12.1.1", lg.__app_version__)
+check("без сведений о клиенте ничего не блокируем",
+      not lg.client_too_old("12.1.1"))
+
+real_client = lg.client_version
+lg.client_version = lambda: "12.0.1"
+check("старый клиент распознан", lg.client_too_old("12.1.1"))
+lg.client_version = lambda: "12.1.1"
+check("ровно нужная версия подходит", not lg.client_too_old("12.1.1"))
+lg.client_version = lambda: "12.9.0"
+check("новый клиент подходит", not lg.client_too_old("12.1.1"))
+lg.client_version = lambda: "12.0.1"
+check("без требования в update.json не блокируем", not lg.client_too_old(""))
+
+upd_plugin = lg.LinkGuardPlugin()
+upd_plugin.on_plugin_load()
+said = []
+upd_plugin._toast = lambda text: said.append(text)
+lg.fetch_update_info = lambda timeout=8: {
+    "version": "9.9.9", "min_app_version": "12.1.1", "changelog": ["новое"]}
+upd_plugin._check_updates(manual=True)
+check("обновление не предлагается на старом клиенте",
+      not upd_plugin.get_setting("update_version", ""),
+      upd_plugin.get_setting("update_version", ""))
+check("и человеку сказано почему",
+      any("12.1.1" in text for text in said), said)
+
+lg.client_version = lambda: "12.9.0"
+said[:] = []
+upd_plugin._check_updates(manual=True)
+check("на новом клиенте обновление предлагается",
+      upd_plugin.get_setting("update_version", "") == "9.9.9",
+      upd_plugin.get_setting("update_version", ""))
+lg.client_version = real_client
+lg.fetch_update_info = lambda timeout=8: None
+
 print("\nСовместимость со старым SDK")
 try:
     lite = load_plugin(minimal=True)
