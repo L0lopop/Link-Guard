@@ -1514,6 +1514,45 @@ check("у пустого журнала понятный текст",
       db_plugin._log_text() == lg.phrase("log_empty"))
 db_plugin.set_setting("debug_log", False)
 
+print("\nКнопка на репозиторий")
+repo_plugin = lg.LinkGuardPlugin()
+repo_plugin.on_plugin_load()
+opened = []
+repo_plugin._open_with_browser = lambda context, url: opened.append(("browser", url)) or True
+repo_plugin._on_repo_click()
+check("кнопка открывает наш репозиторий",
+      opened == [("browser", lg.REPO_URL)], opened)
+check("адрес ведёт на GitHub",
+      lg.REPO_URL.startswith("https://github.com/"), lg.REPO_URL)
+check("своя же ссылка не вызовет предупреждения",
+      lg.REPO_URL in repo_plugin._bypass, list(repo_plugin._bypass))
+
+opened[:] = []
+repo_plugin._open_with_browser = lambda context, url: False
+repo_plugin._open_with_intent = staticmethod(
+    lambda context, url: opened.append(("intent", url)) or True)
+repo_plugin._on_repo_click()
+check("если браузер не вышел, пробуем систему",
+      opened == [("intent", lg.REPO_URL)], opened)
+
+opened[:] = []
+said_repo = []
+repo_plugin._open_with_intent = staticmethod(lambda context, url: False)
+repo_plugin._toast = lambda text: said_repo.append(text)
+repo_plugin._bypass.clear()
+check("когда открыть нечем, ссылка копируется",
+      repo_plugin._open_link(lg.REPO_URL) is False and said_repo, said_repo)
+check("и след от неё убран", lg.REPO_URL not in repo_plugin._bypass)
+
+rows = [r for r in repo_plugin.create_settings()
+        if getattr(r, "text", None) == lg.phrase("btn_repo")]
+check("строка есть в настройках", len(rows) == 1, len(rows))
+check("и она под проверкой обновлений",
+      [getattr(r, "text", "") for r in repo_plugin.create_settings()].index(
+          lg.phrase("btn_repo"))
+      == [getattr(r, "text", "") for r in repo_plugin.create_settings()].index(
+          lg.phrase("btn_check_now")) + 1)
+
 print("\nМинимальная версия клиента")
 check("плагин требует 12.1.1", lg.__app_version__ == ">=12.1.1", lg.__app_version__)
 check("без сведений о клиенте ничего не блокируем",

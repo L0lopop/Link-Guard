@@ -180,6 +180,8 @@ STRINGS = {
         "upd_ahead": "У вас сборка новее опубликованной: %s (в каталоге %s)",
         "upd_whats_new": "Что нового:",
         "upd_client_old": "Новая версия требует клиент %s или новее — обновите приложение",
+        "btn_repo": "Исходный код на GitHub",
+        "btn_repo_sub": "Посмотреть, как плагин устроен, и сообщить о проблеме",
         "upd_install": "Перейти на новую версию",
         "upd_downloading": "Скачиваю обновление…",
         "upd_ready": "Подтвердите установку — плагин заменит себя новой версией",
@@ -331,6 +333,8 @@ STRINGS = {
         "upd_ahead": "Your build is newer than the published one: %s (catalog has %s)",
         "upd_whats_new": "What is new:",
         "upd_client_old": "The new version needs client %s or newer — update the app",
+        "btn_repo": "Source code on GitHub",
+        "btn_repo_sub": "See how the plugin works and report a problem",
         "upd_install": "Get the new version",
         "upd_downloading": "Downloading the update…",
         "upd_ready": "Confirm the install — the plugin will replace itself",
@@ -1657,6 +1661,8 @@ class LinkGuardPlugin(BasePlugin):
                    subtext=phrase("sw_updates_sub")),
             Text(text=phrase("btn_check_now"), subtext=phrase("version_line", __version__),
                  accent=True, on_click=self._on_check_updates_click),
+            Text(text=phrase("btn_repo"), subtext=phrase("btn_repo_sub"),
+                 on_click=self._on_repo_click),
 
             Divider(),
             Text(text=phrase("privacy_title"), subtext=phrase("read_more"),
@@ -2758,6 +2764,44 @@ class LinkGuardPlugin(BasePlugin):
         except Exception as e:
             log("LinkGuard: intent failed: %s" % e)
             return False
+
+    def _own_context(self):
+        try:
+            fragment = get_last_fragment()
+            if fragment is not None:
+                activity = fragment.getParentActivity()
+                if activity is not None:
+                    return activity
+        except Exception as e:
+            self._debug("link: экран недоступен: %s" % e)
+        if find_class is None:
+            return None
+        try:
+            loader = find_class("org.telegram.messenger.ApplicationLoader")
+            return loader.applicationContext if loader is not None else None
+        except Exception as e:
+            self._debug("link: контекст приложения недоступен: %s" % e)
+            return None
+
+    def _open_link(self, url):
+        bypass = getattr(self, "_bypass", None)
+        if bypass is not None:
+            bypass[url] = time.monotonic()
+        context = self._own_context()
+        if self._open_with_browser(context, url):
+            self._debug("link: открыл через Browser")
+            return True
+        if self._open_with_intent(context, url):
+            self._debug("link: открыл через Intent")
+            return True
+        if bypass is not None:
+            bypass.pop(url, None)
+        copy_to_clipboard(url)
+        self._toast(phrase("toast_copied"))
+        return False
+
+    def _on_repo_click(self, *args):
+        self._open_link(REPO_URL)
 
     def _reopen(self, method, args, index, url):
         now = time.monotonic()
