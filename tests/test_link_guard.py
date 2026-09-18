@@ -1514,6 +1514,85 @@ check("у пустого журнала понятный текст",
       db_plugin._log_text() == lg.phrase("log_empty"))
 db_plugin.set_setting("debug_log", False)
 
+print("\nПоле проверки ссылки в настройках")
+probe = lg.LinkGuardPlugin()
+probe.on_plugin_load()
+probe_said = []
+probe._toast = lambda text: probe_said.append(text)
+
+probe.set_setting("probe_url", "")
+FakeDialog.last = None
+probe._on_probe_click()
+check("пустое поле — только уведомление",
+      FakeDialog.last is None and probe_said, probe_said)
+
+probe.set_setting("probe_url", "https://sberbank-shop.ru/oplata")
+FakeDialog.last = None
+probe._on_probe_click()
+check("разбор показан окном", FakeDialog.last is not None and FakeDialog.last.shown)
+check("в разборе назван домен",
+      "sberbank-shop.ru" in (FakeDialog.last.message or ""), FakeDialog.last.message)
+check("и заголовок про опасность",
+      FakeDialog.last.title == lg.phrase("title_danger"), FakeDialog.last.title)
+
+probe.set_setting("probe_url", "google.com")
+FakeDialog.last = None
+probe._on_probe_click()
+check("адрес без схемы тоже разбирается",
+      FakeDialog.last is not None and "google.com" in (FakeDialog.last.message or ""),
+      FakeDialog.last.message if FakeDialog.last else None)
+
+before_warned = probe._stat("stats_warned")
+probe.set_setting("probe_url", "https://sberbank-shop.ru/oplata")
+probe._on_probe_click()
+check("ручная проверка не портит статистику",
+      probe._stat("stats_warned") == before_warned, probe._stat("stats_warned"))
+
+rows = [getattr(r, "text", "") for r in probe.create_settings()]
+check("поле и кнопка есть в настройках",
+      lg.phrase("in_probe") in rows and lg.phrase("btn_probe") in rows, rows[:8])
+
+print("\nПункты меню сообщения")
+menu_plugin = lg.LinkGuardPlugin()
+menu_plugin.on_plugin_load()
+menu_said = []
+menu_plugin._toast = lambda text: menu_said.append(text)
+fake_msg = types.SimpleNamespace(
+    messageText="Смотри https://sberbank-shop.ru/oplata и https://google.com/",
+    caption=None,
+    messageOwner=types.SimpleNamespace(message="", entities=None))
+
+FakeDialog.last = None
+menu_plugin.on_menu_check({"message": fake_msg})
+check("«Проверить ссылки» открывает окно",
+      FakeDialog.last is not None and FakeDialog.last.shown)
+check("в окне оба адреса",
+      "sberbank-shop.ru" in (FakeDialog.last.message or "")
+      and "google.com" in (FakeDialog.last.message or ""),
+      FakeDialog.last.message)
+check("и сказано, сколько проверено",
+      lg.phrase("checked_n", 2) == FakeDialog.last.title, FakeDialog.last.title)
+
+copied = []
+real_copy = lg.copy_to_clipboard
+lg.copy_to_clipboard = lambda text: copied.append(text)
+menu_plugin.on_menu_copy({"message": fake_msg})
+check("«Копировать без трекеров» кладёт адреса в буфер",
+      copied and "sberbank-shop.ru" in copied[0], copied)
+lg.copy_to_clipboard = real_copy
+
+menu_said[:] = []
+FakeDialog.last = None
+empty_msg = types.SimpleNamespace(
+    messageText="просто текст без ссылок", caption=None,
+    messageOwner=types.SimpleNamespace(message="", entities=None))
+menu_plugin.on_menu_check({"message": empty_msg})
+check("без ссылок окно не открывается и есть уведомление",
+      FakeDialog.last is None and menu_said, menu_said)
+
+menu_plugin.on_menu_check({})
+check("без сообщения обработчик молча выходит", True)
+
 print("\nНелепые адреса не подвешивают разбор")
 started_at = time.time()
 for host, name in (

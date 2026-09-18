@@ -2,7 +2,7 @@ __id__ = "link_guard"
 __name__ = "Link Guard"
 __description__ = "Разбирает ссылки перед переходом: показывает настоящий домен, ловит фишинг и подмену символов, вычищает трекеры"
 __author__ = "@Robobloxi"
-__version__ = "1.5.1"
+__version__ = "1.6.0"
 __icon__ = "likguar/0"
 __app_version__ = ">=12.1.1"
 
@@ -180,6 +180,10 @@ STRINGS = {
         "upd_ahead": "У вас сборка новее опубликованной: %s (в каталоге %s)",
         "upd_whats_new": "Что нового:",
         "upd_client_old": "Новая версия требует клиент %s или новее — обновите приложение",
+        "in_probe": "Проверить ссылку",
+        "in_probe_sub": "Вставьте адрес, чтобы посмотреть разбор без перехода",
+        "btn_probe": "Разобрать",
+        "probe_empty": "Сначала вставьте адрес в поле выше",
         "btn_repo": "Исходный код на GitHub",
         "btn_repo_sub": "Посмотреть, как плагин устроен, и сообщить о проблеме",
         "upd_install": "Перейти на новую версию",
@@ -190,7 +194,6 @@ STRINGS = {
         "toast_upd_available": "Link Guard: доступна версия %s",
         "upd_title": "Доступна версия %s",
         "upd_body": "Установлена %s.\n\n%s\n\n%s",
-        "btn_copy_link": "Скопировать ссылку",
         "btn_later": "Позже",
         "f_unparsable": "Адрес не разбирается — вероятно, специально исковеркан",
         "f_scheme": "Схема «%s» — это не переход на сайт, а выполнение кода или открытие файла",
@@ -333,6 +336,10 @@ STRINGS = {
         "upd_ahead": "Your build is newer than the published one: %s (catalog has %s)",
         "upd_whats_new": "What is new:",
         "upd_client_old": "The new version needs client %s or newer — update the app",
+        "in_probe": "Check a link",
+        "in_probe_sub": "Paste an address to see the breakdown without opening it",
+        "btn_probe": "Break it down",
+        "probe_empty": "Paste an address into the field above first",
         "btn_repo": "Source code on GitHub",
         "btn_repo_sub": "See how the plugin works and report a problem",
         "upd_install": "Get the new version",
@@ -343,7 +350,6 @@ STRINGS = {
         "toast_upd_available": "Link Guard: version %s is available",
         "upd_title": "Version %s is available",
         "upd_body": "You have %s.\n\n%s\n\n%s",
-        "btn_copy_link": "Copy link",
         "btn_later": "Later",
         "f_unparsable": "The address cannot be parsed — most likely mangled on purpose",
         "f_scheme": "The «%s» scheme does not open a site — it runs code or opens a file",
@@ -1227,6 +1233,7 @@ AGE_ALARM_DAYS = 30
 AGE_NOTE_DAYS = 120
 AGE_CACHE_MAX = 200
 AGE_CACHE_TTL = 7 * 24 * 60 * 60
+AGE_MISS_TTL = 6 * 60 * 60
 
 
 def add_age_flag(verdict, days):
@@ -1532,17 +1539,25 @@ def fetch_update_info(timeout=8):
 
 
 def expand(url, timeout=6):
+    resp = None
     try:
         import requests
         headers = {"User-Agent": "Mozilla/5.0 (Android) LinkGuard/1.0"}
         resp = requests.head(url, allow_redirects=True, timeout=timeout, headers=headers)
         if resp.status_code >= 400 or not resp.history:
+            resp.close()
             resp = requests.get(url, allow_redirects=True, timeout=timeout,
                                 headers=headers, stream=True)
         return resp.url, len(resp.history)
     except Exception as e:
         log("LinkGuard: expand failed: %s" % e)
         return None, 0
+    finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
 
 if MethodHook is not None:
@@ -1637,6 +1652,11 @@ class LinkGuardPlugin(BasePlugin):
                      items=[phrase("mode_suspicious"), phrase("mode_always")]),
             Switch(key="expand_short", text=phrase("sw_expand"), default=True,
                    subtext=phrase("sw_expand_sub")),
+            Input(key="probe_url", text=phrase("in_probe"),
+                  default=self.get_setting("probe_url", "") or "",
+                  subtext=phrase("in_probe_sub")),
+            Text(text=phrase("btn_probe"), accent=True,
+                 on_click=self._on_probe_click),
 
             Header(text=phrase("hdr_tracker")),
             Switch(key="clean_on_open", text=phrase("sw_clean_open"), default=True,
@@ -2524,14 +2544,19 @@ class LinkGuardPlugin(BasePlugin):
             cache = self._ages = {}
         now = time.time()
         hit = cache.get(domain)
-        if hit and now - hit[0] < AGE_CACHE_TTL:
-            return hit[1]
+        if hit:
+            age = AGE_CACHE_TTL if hit[1] is not None else AGE_MISS_TTL
+            if now - hit[0] < age:
+                return hit[1]
         if not DOMAIN_RE.fullmatch(domain or ""):
             self._debug("rdap: %s — не доменное имя, пропускаю" % domain)
             return None
         self._debug("rdap: спрашиваю %s" % domain)
         days = domain_age_days(domain)
         if days is None or days < 0:
+            if len(cache) >= AGE_CACHE_MAX:
+                cache.clear()
+            cache[domain] = (now, None)
             self._debug("rdap: %s — ответа нет" % domain)
             return None
         if len(cache) >= AGE_CACHE_MAX:
@@ -2810,6 +2835,20 @@ class LinkGuardPlugin(BasePlugin):
     def _on_repo_click(self, *args):
         self._open_link(REPO_URL)
 
+    def _on_probe_click(self, *args):
+        raw = str(self.get_setting("probe_url", "") or "").strip()
+        if not raw:
+            self._toast(phrase("probe_empty"))
+            return
+        url = raw if "://" in raw else "http://" + raw
+        verdict = self._cached_analyze(url, self._anchors.get(url))
+        body = self._describe(verdict)
+        self._debug("probe %s risk=%s" % (url, verdict.risk))
+        if not self._can_dialog():
+            self._toast(body)
+            return
+        self._show_note(self._title(verdict), body)
+
     def _reopen(self, method, args, index, url):
         now = time.monotonic()
         self._bypass[url] = now
@@ -2928,7 +2967,7 @@ class LinkGuardPlugin(BasePlugin):
 
         verdicts = [self._cached_analyze(u, self._anchors.get(u)) for u in urls[:5]]
         marks = {HIGH: "⛔", MEDIUM: "⚠️", LOW: "•", INFO: "✓"}
-        blocks = ["%s %s\n%s" % (marks[v.risk], verdict.display_host or verdict.host or "?",
+        blocks = ["%s %s\n%s" % (marks[v.risk], v.display_host or v.host or "?",
                                  self._describe(v)) for v in verdicts]
 
         builder = AlertDialogBuilder(get_last_fragment().getParentActivity())
