@@ -29,6 +29,8 @@ jobs:
         run: python scripts/build_db.py
         env:
           LG_OUT: db
+          ABUSE_CH_KEY: ${{ secrets.ABUSE_CH_KEY }}
+          PHISHTANK_KEY: ${{ secrets.PHISHTANK_KEY }}
 
       - name: Показать итог
         run: cat db/manifest.json

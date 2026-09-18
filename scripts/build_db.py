@@ -1,4 +1,5 @@
 
+import csv
 import hashlib
 import json
 import os
@@ -26,6 +27,17 @@ FEEDS = [
     ("blocklistproject", "https://raw.githubusercontent.com/blocklistproject/Lists/master/phishing.txt"),
     ("malware-filter", "https://malware-filter.gitlab.io/malware-filter/phishing-filter-domains.txt"),
     ("urlhaus", "https://urlhaus.abuse.ch/downloads/text_online/"),
+    ("phishunt", "https://phishunt.io/feed.txt"),
+    ("phishdb-links", "https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-links-ACTIVE.txt"),
+]
+
+KEYED_FEEDS = [
+    ("urlhaus-full", "https://urlhaus.abuse.ch/downloads/text/",
+     "ABUSE_CH_KEY", "Auth-Key", None),
+    ("threatfox", "https://threatfox.abuse.ch/export/csv/domains/recent/",
+     "ABUSE_CH_KEY", "Auth-Key", 2),
+    ("phishtank", "http://data.phishtank.com/data/%s/online-valid.csv",
+     "PHISHTANK_KEY", None, 1),
 ]
 
 TRANCO_URL = "https://tranco-list.eu/top-1m.csv.zip"
@@ -96,11 +108,14 @@ def warn(msg):
         print("::warning::%s" % msg, flush=True)
 
 
-def fetch(url, binary=False):
+def fetch(url, binary=False, headers=None):
     last = None
     for attempt in range(1, RETRIES + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            sending = {"User-Agent": UA}
+            if headers:
+                sending.update(headers)
+            req = urllib.request.Request(url, headers=sending)
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 raw = resp.read()
                 meta = {
@@ -236,24 +251,55 @@ def feed_status(previous, mark, today):
     return changed, frozen
 
 
+def hosts_from(text, column=None):
+    found = set()
+    if column is None:
+        for line in text.splitlines():
+            host = normalize(line)
+            if host:
+                found.add(host)
+        return found
+    rows = csv.reader(
+        [line for line in text.splitlines()
+         if line.strip() and not line.startswith("#")],
+        skipinitialspace=True)
+    for row in rows:
+        if len(row) > column:
+            host = normalize(row[column])
+            if host:
+                found.add(host)
+    return found
+
+
+def keyed_sources():
+    sources = []
+    for name, url, variable, header, column in KEYED_FEEDS:
+        key = os.environ.get(variable, "").strip()
+        if not key:
+            log("  %-17s пропущен: нет ключа %s" % (name, variable))
+            continue
+        if header:
+            sources.append((name, url, {header: key}, column))
+        else:
+            sources.append((name, url % key, None, column))
+    return sources
+
+
 def collect_feeds(report, previous):
     membership = defaultdict(set)
     healthy = 0
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     old_feeds = previous.get("feeds") or {}
 
-    for name, url in FEEDS:
-        text, meta = fetch(url)
+    plain = [(name, url, None, None) for name, url in FEEDS]
+    for name, url, headers, column in plain + keyed_sources():
+        text, meta = fetch(url, headers=headers)
         if text is None:
             report["feeds"][name] = {"ok": False}
             warn("источник %s не скачался" % name)
             continue
 
-        hosts = set()
-        for line in text.splitlines():
-            host = normalize(line)
-            if host:
-                hosts.add(host)
+        hosts = hosts_from(text, column)
         mark = fingerprint(hosts)
         changed, frozen = feed_status(old_feeds.get(name), mark, today)
 
