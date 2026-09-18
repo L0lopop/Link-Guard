@@ -180,10 +180,6 @@ STRINGS = {
         "upd_ahead": "У вас сборка новее опубликованной: %s (в каталоге %s)",
         "upd_whats_new": "Что нового:",
         "upd_client_old": "Новая версия требует клиент %s или новее — обновите приложение",
-        "in_probe": "Проверить ссылку",
-        "in_probe_sub": "Вставьте адрес, чтобы посмотреть разбор без перехода",
-        "btn_probe": "Разобрать",
-        "probe_empty": "Сначала вставьте адрес в поле выше",
         "btn_repo": "Исходный код на GitHub",
         "btn_repo_sub": "Посмотреть, как плагин устроен, и сообщить о проблеме",
         "upd_install": "Перейти на новую версию",
@@ -336,10 +332,6 @@ STRINGS = {
         "upd_ahead": "Your build is newer than the published one: %s (catalog has %s)",
         "upd_whats_new": "What is new:",
         "upd_client_old": "The new version needs client %s or newer — update the app",
-        "in_probe": "Check a link",
-        "in_probe_sub": "Paste an address to see the breakdown without opening it",
-        "btn_probe": "Break it down",
-        "probe_empty": "Paste an address into the field above first",
         "btn_repo": "Source code on GitHub",
         "btn_repo_sub": "See how the plugin works and report a problem",
         "upd_install": "Get the new version",
@@ -1652,11 +1644,6 @@ class LinkGuardPlugin(BasePlugin):
                      items=[phrase("mode_suspicious"), phrase("mode_always")]),
             Switch(key="expand_short", text=phrase("sw_expand"), default=True,
                    subtext=phrase("sw_expand_sub")),
-            Input(key="probe_url", text=phrase("in_probe"),
-                  default=self.get_setting("probe_url", "") or "",
-                  subtext=phrase("in_probe_sub")),
-            Text(text=phrase("btn_probe"), accent=True,
-                 on_click=self._on_probe_click),
 
             Header(text=phrase("hdr_tracker")),
             Switch(key="clean_on_open", text=phrase("sw_clean_open"), default=True,
@@ -2835,19 +2822,6 @@ class LinkGuardPlugin(BasePlugin):
     def _on_repo_click(self, *args):
         self._open_link(REPO_URL)
 
-    def _on_probe_click(self, *args):
-        raw = str(self.get_setting("probe_url", "") or "").strip()
-        if not raw:
-            self._toast(phrase("probe_empty"))
-            return
-        url = raw if "://" in raw else "http://" + raw
-        verdict = self._cached_analyze(url, self._anchors.get(url))
-        body = self._describe(verdict)
-        self._debug("probe %s risk=%s" % (url, verdict.risk))
-        if not self._can_dialog():
-            self._toast(body)
-            return
-        self._show_note(self._title(verdict), body)
 
     def _reopen(self, method, args, index, url):
         now = time.monotonic()
