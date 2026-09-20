@@ -1103,6 +1103,26 @@ for host in ("pineapple-shop.ru", "moy-magazin.shop",
     check("%s не считается подделкой" % host,
           not any("не принадлежит" in text for _, text in v.flags), v.flags)
 
+print("\nСклеенное имя ловится только со словом-приманкой")
+for host, stolen in (("sberbankshop.com", "sberbank"),
+                     ("googleoplata.ru", "google"),
+                     ("wildberriesbonus.top", "wildberries"),
+                     ("telegrampremium.site", "telegram")):
+    v = lg.analyze("https://%s/" % host)
+    check("%s — подделка" % host,
+          any(stolen in t and "не принадлежит" in t for _, t in v.flags), v.flags)
+
+for host in ("googlefonts.github.io", "googledevelopers.example.com",
+             "appleinsider.ru", "telegramgeek.ru", "yandexblog.example"):
+    v = lg.analyze("https://%s/" % host)
+    check("%s — не подделка" % host,
+          not any("не принадлежит" in t for _, t in v.flags), v.flags)
+
+check("отдельным словом ловится по-прежнему",
+      lg.brand_with_extra("google-oplata.ru", lg.BRANDS, lg.BRAND_LIST) == "google")
+check("склеенное с обычным словом пропускается",
+      lg.brand_with_extra("googlefonts.github.io", lg.BRANDS, lg.BRAND_LIST) is None)
+
 check("имя ровно как у бренда, но в другой зоне, правилом не ловится",
       lg.brand_with_extra("sberbank.com", lg.BRANDS, lg.BRAND_LIST) is None,
       lg.brand_with_extra("sberbank.com", lg.BRANDS, lg.BRAND_LIST))
@@ -1614,6 +1634,17 @@ check("и след от неё убран", lg.REPO_URL not in repo_plugin._bypa
 rows = [r for r in repo_plugin.create_settings()
         if getattr(r, "text", None) == lg.phrase("btn_repo")]
 check("строка есть в настройках", len(rows) == 1, len(rows))
+
+opened[:] = []
+repo_plugin._open_with_browser = lambda context, url: opened.append(("browser", url)) or True
+repo_plugin._on_chat_click()
+check("кнопка чата открывает нужный адрес",
+      opened == [("browser", "https://t.me/kringplugins")], opened)
+check("адрес чата ведёт в Telegram",
+      lg.CHAT_URL == "https://t.me/kringplugins", lg.CHAT_URL)
+chat_rows = [r for r in repo_plugin.create_settings()
+             if getattr(r, "text", None) == lg.phrase("btn_chat")]
+check("строка чата есть в настройках", len(chat_rows) == 1, len(chat_rows))
 check("и она под проверкой обновлений",
       [getattr(r, "text", "") for r in repo_plugin.create_settings()].index(
           lg.phrase("btn_repo"))
