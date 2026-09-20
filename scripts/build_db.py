@@ -74,7 +74,8 @@ BAIT_MARKERS = (
     "refund", "invoice", "payment", "banking", "verify", "restore",
 )
 
-WHITELIST_TOP = 50000
+WHITELIST_TOP = 200000
+PROTECT_TOP = 50000
 BRAND_TOP = 1000
 
 FULL_BITS = 40
@@ -442,7 +443,7 @@ def main():
     log("  PSL: %d правил" % len(rules))
 
     whitelist = popular[:WHITELIST_TOP]
-    protected = set(whitelist)
+    protected = set(popular[:PROTECT_TOP])
     removed = sorted(h for h in membership if h in protected)
     for host in removed:
         del membership[host]
