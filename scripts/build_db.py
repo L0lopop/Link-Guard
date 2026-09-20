@@ -34,7 +34,7 @@ FEEDS = [
 KEYED_FEEDS = [
     ("urlhaus-full", "https://urlhaus.abuse.ch/downloads/text/",
      "ABUSE_CH_KEY", "Auth-Key", None),
-    ("threatfox", "https://threatfox.abuse.ch/export/csv/domains/recent/",
+    ("threatfox", "https://threatfox.abuse.ch/export/csv/full/",
      "ABUSE_CH_KEY", "Auth-Key", 2),
     ("phishtank", "http://data.phishtank.com/data/%s/online-valid.csv",
      "PHISHTANK_KEY", None, 1),
@@ -252,6 +252,21 @@ def feed_status(previous, mark, today):
     return changed, frozen
 
 
+def unpack(payload):
+    if payload is None:
+        return None
+    if payload[:2] != b"PK":
+        return payload.decode("utf-8", "ignore")
+    try:
+        with zipfile.ZipFile(BytesIO(payload)) as archive:
+            names = archive.namelist()
+            if not names:
+                return None
+            return archive.read(names[0]).decode("utf-8", "ignore")
+    except (zipfile.BadZipFile, KeyError):
+        return None
+
+
 def hosts_from(text, column=None):
     found = set()
     if column is None:
@@ -294,7 +309,8 @@ def collect_feeds(report, previous):
 
     plain = [(name, url, None, None) for name, url in FEEDS]
     for name, url, headers, column in plain + keyed_sources():
-        text, meta = fetch(url, headers=headers)
+        payload, meta = fetch(url, binary=True, headers=headers)
+        text = unpack(payload)
         if text is None:
             report["feeds"][name] = {"ok": False}
             warn("источник %s не скачался" % name)
