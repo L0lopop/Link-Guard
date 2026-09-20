@@ -277,6 +277,13 @@ def main():
     check(all(lvl in (2, 3) for lvl in zones.values()),
           "уровни только 2 и 3: %s" % sorted(set(zones.values())))
 
+    print("== служебные адреса известных сайтов ==")
+    for host in ("raw.githubusercontent.com", "gist.githubusercontent.com",
+                 "storage.googleapis.com", "cdn.jsdelivr.net",
+                 "files.pythonhosted.org", "cdn.discordapp.com",
+                 "storage.yandexcloud.net"):
+        check(not full.has("MALW", host), "%s не помечен вредоносным" % host)
+
     print("== свежерегистрированные домены ==")
     fresh10 = struct.unpack(">I", full.sections["FR10"][1:5])[0]
     fresh30 = struct.unpack(">I", full.sections["FR30"][1:5])[0]

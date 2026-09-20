@@ -91,6 +91,14 @@ SHRINK_LIMIT = 0.5
 
 POPULAR_SUBDOMAIN_LIMIT = 20
 
+SERVICE_LABELS = frozenset((
+    "raw", "gist", "media", "storage", "cdn", "static", "files", "file",
+    "assets", "asset", "objects", "object", "content", "usercontent",
+    "download", "downloads", "img", "images", "image", "upload", "uploads",
+    "attachment", "attachments", "release", "releases", "blob", "blobs",
+    "s3", "public", "cache", "edge", "stream", "video", "photo", "photos",
+))
+
 BLOCK_SIZE = 256
 INDEX_ENTRY = 12
 
@@ -414,6 +422,35 @@ def registrable(host, rules, wildcards):
     return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
 
+def popular_ancestor(host, protected):
+    parts = host.split(".")
+    for i in range(1, len(parts) - 1):
+        candidate = ".".join(parts[i:])
+        if candidate in protected:
+            return candidate
+    return None
+
+
+def service_labels_only(prefix):
+    pieces = []
+    for label in prefix.split("."):
+        pieces.extend(part for part in label.split("-") if part)
+    return bool(pieces) and all(part in SERVICE_LABELS for part in pieces)
+
+
+def clear_service_hosts(membership, protected):
+    dropped = []
+    for host in membership:
+        parent = popular_ancestor(host, protected)
+        if not parent:
+            continue
+        if service_labels_only(host[:len(host) - len(parent) - 1]):
+            dropped.append(host)
+    for host in dropped:
+        del membership[host]
+    return dropped
+
+
 def clear_popular_subdomains(membership, protected, rules, wildcards):
     groups = defaultdict(list)
     for host in membership:
@@ -471,6 +508,10 @@ def main():
         len(dropped), ", ".join(sorted(dropped)[:5])))
     log("  площадок с самообслуживанием: %d (например: %s)" % (
         len(busy), ", ".join(sorted(busy)[:5])))
+
+    service = clear_service_hosts(membership, protected)
+    log("  снято служебных адресов известных сайтов: %d (например: %s)" % (
+        len(service), ", ".join(sorted(service)[:5])))
 
     malicious = list(membership)
     log("== итог: %d уникальных вредоносных хостов ==" % len(malicious))
@@ -548,6 +589,7 @@ def main():
         "worst_zones": zone_report,
         "removed_by_whitelist": len(removed),
         "removed_popular_subdomains": len(dropped),
+        "removed_service_hosts": len(service),
     })
     with open(os.path.join(OUT_DIR, "manifest.json"), "w", encoding="utf-8") as handle:
         json.dump(report, handle, ensure_ascii=False, indent=2)
