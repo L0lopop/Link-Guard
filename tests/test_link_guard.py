@@ -1688,6 +1688,164 @@ check("на новом клиенте обновление предлагает�
 lg.client_version = real_client
 lg.fetch_update_info = lambda timeout=8: None
 
+print("\nЧистка: метки с заглавными и нетронутые параметры")
+url, removed = lg.clean_url("https://x.example.com/p?hsCtaTracking=abc&id=1")
+check("hsCtaTracking вырезается", url == "https://x.example.com/p?id=1"
+      and removed == ["hsCtaTracking"], (url, removed))
+url, removed = lg.clean_url("https://x.example.com/p?trkCampaign=abc&id=1", aggressive=True)
+check("trkCampaign вырезается в агрессивном режиме", url == "https://x.example.com/p?id=1", url)
+check("метки в списках записаны строчными — иначе они мертвы",
+      all(k == k.lower() for k in lg.TRACKER_EXACT | lg.TRACKER_AGGRESSIVE))
+url, removed = lg.clean_url(
+    "https://x.example.com/p?flag&q=a%2Fb+c&utm_source=tg&sig=AbC%3D%3D#part")
+check("оставшиеся параметры не пересобираются",
+      url == "https://x.example.com/p?flag&q=a%2Fb+c&sig=AbC%3D%3D#part", url)
+url, _ = lg.clean_url("https://x.example.com/p?UTM_Source=tg&id=1")
+check("метка в верхнем регистре снимается", url == "https://x.example.com/p?id=1", url)
+url, _ = lg.clean_url("https://x.example.com/p?utm_source=tg")
+check("если вырезано всё, знак вопроса не остаётся", url == "https://x.example.com/p", url)
+url, _ = lg.clean_url("https://x.example.com/p?utm%5Fsource=tg&id=1")
+check("закодированное имя метки распознаётся", url == "https://x.example.com/p?id=1", url)
+
+print("\nРазвёрнутая короткая ссылка чистится")
+real_expand = lg.expand
+lg.expand = lambda url, timeout=6: ("https://final.example.com/promo?utm_source=bitly&id=5", 1)
+exp_plugin = lg.LinkGuardPlugin()
+exp_plugin.on_plugin_load()
+exp_handler = exp_plugin.installed_hooks[-1]
+param = FakeParam("https://bit.ly/clean1")
+exp_handler.before_hooked_method(param)
+shown_text = FakeDialog.last.message or ""
+check("в разборе конечный адрес без трекеров",
+      "final.example.com/promo?id=5" in shown_text and "utm_source=" not in shown_text,
+      shown_text)
+check("вырезанная у конечного адреса метка названа в разборе",
+      "utm_source" in shown_text, shown_text)
+FakeDialog.last.press("positive")
+check("открывается очищенный конечный адрес",
+      param.method.calls and param.method.calls[-1][1]
+      == "https://final.example.com/promo?id=5",
+      param.method.calls)
+exp_plugin.set_setting("clean_on_open", False)
+param = FakeParam("https://bit.ly/clean2")
+exp_handler.before_hooked_method(param)
+check("с выключенной чисткой конечный адрес не трогаем",
+      "utm_source=bitly" in (FakeDialog.last.message or ""), FakeDialog.last.message)
+lg.expand = real_expand
+
+print("\nСчётчик предупреждений")
+warn_plugin = lg.LinkGuardPlugin()
+warn_plugin.on_plugin_load()
+warn_handler = warn_plugin.installed_hooks[-1]
+warn_plugin.set_setting("show_mode", 1)
+before = warn_plugin._stat("stats_warned")
+warn_handler.before_hooked_method(FakeParam("https://www.wikipedia.org/wiki/Telegram"))
+check("окно на чистой ссылке не считается предупреждением",
+      warn_plugin._stat("stats_warned") == before, warn_plugin._stat("stats_warned"))
+warn_handler.before_hooked_method(FakeParam("https://sberbamk.ru/login"))
+check("настоящее предупреждение считается",
+      warn_plugin._stat("stats_warned") == before + 1, warn_plugin._stat("stats_warned"))
+
+print("\nСтатус базы в настройках")
+db_plugin.set_setting("use_database", True)
+lg.install_database(types.SimpleNamespace(age_days=0, total=3664881))
+status = db_plugin._database_status()
+check("свежая база — «сегодня», а не «0 дней назад»",
+      "сегодня" in status and "0 дн" not in status, status)
+check("число с разрядами и верным окончанием", "3 664 881 запись" in status, status)
+lg.install_database(types.SimpleNamespace(age_days=3, total=12))
+status = db_plugin._database_status()
+check("старая база — «3 дня назад»", "3 дня назад" in status and "12 записей" in status,
+      status)
+lg.install_database(None)
+
+print("\nБаза: без описания сборки вслепую не качаем")
+real_fetch, real_stamp = lg.fetch_database, lg.fetch_database_stamp
+blind = []
+lg.fetch_database = lambda name, timeout=90: blind.append(name)
+lg.fetch_database_stamp = lambda timeout=20: None
+mf_plugin = lg.LinkGuardPlugin()
+mf_plugin._cache = {}
+lg.install_database(types.SimpleNamespace(age_days=0, total=10))
+mf_plugin._refresh_database(manual=False)
+check("база есть, описание не пришло — 11 МБ не качаем", not blind, blind)
+mf_plugin._refresh_database(manual=True)
+check("по кнопке в настройках качаем всё равно", blind == ["full.lgdb"], blind)
+blind[:] = []
+lg.install_database(None)
+mf_plugin._refresh_database(manual=False)
+check("базы нет совсем — качаем и без описания", blind == ["full.lgdb"], blind)
+
+print("\nБаза: запись на диск и повторное включение")
+lg.fetch_database = lambda name, timeout=90: blob
+lg.fetch_database_stamp = lambda timeout=20: "2026-09-23 02:36 UTC"
+wr_plugin = lg.LinkGuardPlugin()
+wr_plugin._cache = {}
+wr_plugin._refresh_database(manual=True)
+db_path = wr_plugin._database_path()
+check("база записана целиком", bool(db_path) and os.path.exists(db_path)
+      and os.path.getsize(db_path) == len(blob), db_path)
+check("временный файл не остался", not os.path.exists(db_path + ".part"))
+
+wr_downloads = []
+lg.fetch_database = lambda name, timeout=90: wr_downloads.append(name)
+lg.install_database(None)
+wr_plugin.set_setting("db_applied", False)
+wr_plugin.set_setting("db_checked_at", lg.time.time())
+wr_plugin._sync_database_mode()
+check("после включения база поднята с диска",
+      lg.active_database() is not None and lg.active_database().total == len(BAD))
+check("из сети при этом ничего не качали", not wr_downloads, wr_downloads)
+
+os.remove(db_path)
+lg.install_database(None)
+wr_plugin.set_setting("db_applied", False)
+wr_plugin._sync_database_mode()
+check("копии на диске нет — качаем сразу", wr_downloads == ["full.lgdb"], wr_downloads)
+lg.fetch_database, lg.fetch_database_stamp = real_fetch, real_stamp
+lg.install_database(None)
+
+print("\nБаза: испорченный заголовок")
+broken = bytearray(blob)
+broken[23:25] = b"\x00\x00"
+try:
+    lg.DomainDatabase(bytes(broken))
+    check("нулевой размер блока отвергается", False)
+except ValueError:
+    check("нулевой размер блока отвергается", True)
+
+print("\nПорядок настроек")
+lay_plugin = lg.LinkGuardPlugin()
+lay_plugin.on_plugin_load()
+rows = lay_plugin.create_settings()
+
+
+def row_index(predicate):
+    for i, row in enumerate(rows):
+        if predicate(row):
+            return i
+    return -1
+
+
+tracker_at = row_index(lambda r: getattr(r, "text", None) == lg.phrase("hdr_tracker"))
+stats_at = row_index(lambda r: getattr(r, "text", None) == lg.phrase("hdr_stats"))
+age_at = row_index(lambda r: getattr(r, "key", None) == "check_age")
+tags_at = row_index(lambda r: getattr(r, "text", None) == lg.phrase("tags_title"))
+check("возраст домена стоит в «Проверке ссылок»", 0 <= age_at < tracker_at,
+      (age_at, tracker_at))
+check("пояснение про метки стоит в «Антитрекере»", tracker_at < tags_at < stats_at,
+      (tracker_at, tags_at, stats_at))
+
+print("\nТексты не врут")
+for lang in ("ru", "en"):
+    note = lg.STRINGS[lang]["privacy_note"]
+    check("пояснение о сети (%s) называет базу и rdap.org" % lang,
+          "rdap.org" in note and ("баз" in note or "database" in note), note)
+check("подпись обновлений совпадает с интервалом",
+      "шесть часов" in lg.STRINGS["ru"]["sw_updates_sub"]
+      and "six hours" in lg.STRINGS["en"]["sw_updates_sub"]
+      and lg.UPDATE_INTERVAL == 6 * 60 * 60)
+
 print("\nСовместимость со старым SDK")
 try:
     lite = load_plugin(minimal=True)
