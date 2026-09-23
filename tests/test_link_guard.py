@@ -1863,6 +1863,105 @@ check("подсказка про сброс счётчиков вынесена 
       any(getattr(row, "text", None) == lg.phrase("stats_hint")
           for row in fit_plugin.create_settings()))
 
+print("\nСтроки с переносом подписи")
+
+
+class FakeDetailCell:
+
+    def __init__(self, context):
+        self.multiline = False
+        self.text = self.value = None
+        self.divider = None
+
+    def setMultilineDetail(self, value):
+        self.multiline = value
+
+    def setTextAndValue(self, text, value, divider):
+        self.text, self.value, self.divider = text, value, divider
+
+
+class BrokenDetailCell:
+
+    def __init__(self, context):
+        raise RuntimeError("такой ячейки нет в этой сборке")
+
+
+lg.Custom = lambda **kw: types.SimpleNamespace(kind="custom", **kw)
+lg.TextDetailSettingsCell = FakeDetailCell
+cell_plugin = lg.LinkGuardPlugin()
+cell_plugin.on_plugin_load()
+cell_plugin.set_setting("stats_cleaned", 1)
+cell_plugin.set_setting("stats_warned", 22)
+cell_plugin.set_setting("use_database", True)
+lg.install_database(types.SimpleNamespace(age_days=0, total=3723568))
+rows = cell_plugin.create_settings()
+custom = [row for row in rows if getattr(row, "kind", None) == "custom"]
+values = [row.view.value for row in custom]
+check("четыре строки с переносом подписи", len(custom) == 4, len(custom))
+check("статистика: подсказка прямо под счётчиками",
+      "Предупреждений: 22 · нажмите, чтобы сбросить счётчики" in values, values)
+check("база: полный текст", "В базе 3 723 568 записей, обновлена сегодня" in values, values)
+check("исходный код и чат: полные подписи",
+      any("сообщить о проблеме" in v for v in values)
+      and any("нажмите, чтобы вступить" in v for v in values), values)
+check("перенос включён у всех", all(row.view.multiline for row in custom))
+check("отдельной подписи под статистикой больше нет",
+      not any(getattr(row, "text", None) == lg.phrase("stats_hint") for row in rows))
+dividers = {row.view.text: row.view.divider for row in custom}
+check("черта под «Исходным кодом» есть, под «Чатом» нет",
+      dividers.get(lg.phrase("btn_repo")) is True
+      and dividers.get(lg.phrase("btn_chat")) is False, dividers)
+stats_row = [row for row in custom if row.view.text == lg.phrase("stats_line", 1)][0]
+stats_row.on_click(object())
+check("нажатие на строку статистики сбрасывает счётчики",
+      cell_plugin._stat("stats_warned") == 0, cell_plugin._stat("stats_warned"))
+
+lg.TextDetailSettingsCell = BrokenDetailCell
+rows = cell_plugin.create_settings()
+check("ячейка не создалась — обычные строки, настройки открываются",
+      not any(getattr(row, "kind", None) == "custom" for row in rows)
+      and any(getattr(row, "text", None) == lg.phrase("stats_hint") for row in rows))
+lg.Custom = None
+lg.TextDetailSettingsCell = None
+lg.install_database(None)
+
+print("\nВключение базы: статус не врёт")
+later = []
+re_plugin = lg.LinkGuardPlugin()
+re_plugin.on_plugin_load()
+re_path = re_plugin._database_path()
+with open(re_path, "wb") as handle:
+    handle.write(blob)
+re_plugin._run_background = lambda func: later.append(func)
+lg.install_database(None)
+re_plugin.set_setting("use_database", True)
+re_plugin.set_setting("db_applied", False)
+re_plugin.set_setting("db_checked_at", lg.time.time())
+re_plugin._sync_database_mode()
+check("пока база поднимается — «Загружаю базу…», а не «не скачана»",
+      re_plugin._database_status() == lg.phrase("db_status_loading"),
+      re_plugin._database_status())
+redrawn = []
+real_re_set = re_plugin.set_setting
+
+
+def watch_redraw(key, value, reload_settings=False):
+    if reload_settings:
+        redrawn.append(key)
+    return real_re_set(key, value, reload_settings)
+
+
+re_plugin.set_setting = watch_redraw
+for task in later:
+    task()
+status = re_plugin._database_status()
+check("после загрузки статус показывает базу",
+      status not in (lg.phrase("db_status_loading"), lg.phrase("db_status_none")), status)
+check("экран настроек перерисован", "db_entries" in redrawn, redrawn)
+re_plugin.set_setting = real_re_set
+os.remove(re_path)
+lg.install_database(None)
+
 print("\nТексты не врут")
 for lang in ("ru", "en"):
     note = lg.STRINGS[lang]["privacy_note"]

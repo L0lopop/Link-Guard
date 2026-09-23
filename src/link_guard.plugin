@@ -42,6 +42,16 @@ except Exception:
     HAS_SETTINGS = False
 
 try:
+    from ui.settings import Custom
+except Exception:
+    Custom = None
+
+try:
+    from org.telegram.ui.Cells import TextDetailSettingsCell
+except Exception:
+    TextDetailSettingsCell = None
+
+try:
     from ui.alert import AlertDialogBuilder
 except Exception:
     AlertDialogBuilder = None
@@ -156,6 +166,7 @@ STRINGS = {
         "stats_line": "Вырезано меток: %s",
         "stats_sub": "Предупреждений: %s",
         "stats_hint": "Нажмите на строку со счётчиками, чтобы обнулить их.",
+        "stats_detail": "Предупреждений: %s · нажмите, чтобы сбросить счётчики",
         "stats_done": "Счётчики сброшены",
         "hdr_updates": "Обновления",
         "sw_updates": "Проверять обновления",
@@ -197,8 +208,10 @@ STRINGS = {
         "upd_client_old": "Новая версия требует клиент %s или новее — обновите приложение",
         "btn_repo": "Исходный код на GitHub",
         "btn_repo_sub": "Открыть код, сообщить об ошибке",
+        "btn_repo_detail": "Посмотреть, как плагин устроен, и сообщить о проблеме",
         "btn_chat": "Чат плагина в Telegram",
         "btn_chat_sub": "Новости, вопросы, предложения",
+        "btn_chat_detail": "Новости, вопросы и предложения — нажмите, чтобы вступить",
         "upd_install": "Перейти на новую версию",
         "upd_downloading": "Скачиваю обновление…",
         "upd_ready": "Подтвердите установку — плагин заменит себя новой версией",
@@ -256,6 +269,8 @@ STRINGS = {
         "db_failed": "База не обновилась",
         "db_off": "База выключена в настройках",
         "db_status": "%s · %s",
+        "db_status_full": "В базе %s, обновлена %s",
+        "db_status_loading": "Загружаю базу…",
         "db_today": "сегодня",
         "db_ago": "%s назад",
         "unit_entry": "запись|записи|записей",
@@ -317,6 +332,7 @@ STRINGS = {
         "stats_line": "Tags removed: %s",
         "stats_sub": "Warnings: %s",
         "stats_hint": "Tap the counters row to reset it.",
+        "stats_detail": "Warnings: %s · tap to reset the counters",
         "stats_done": "Counters reset",
         "hdr_updates": "Updates",
         "sw_updates": "Check for updates",
@@ -358,8 +374,10 @@ STRINGS = {
         "upd_client_old": "The new version needs client %s or newer — update the app",
         "btn_repo": "Source code on GitHub",
         "btn_repo_sub": "Browse the code, report a bug",
+        "btn_repo_detail": "See how the plugin works and report a problem",
         "btn_chat": "Plugin chat on Telegram",
         "btn_chat_sub": "News, questions and ideas",
+        "btn_chat_detail": "News, questions and ideas — tap to join",
         "upd_install": "Get the new version",
         "upd_downloading": "Downloading the update…",
         "upd_ready": "Confirm the install — the plugin will replace itself",
@@ -417,6 +435,8 @@ STRINGS = {
         "db_failed": "The database was not updated",
         "db_off": "The database is switched off in settings",
         "db_status": "%s · %s",
+        "db_status_full": "%s in the database, updated %s",
+        "db_status_loading": "Loading the database…",
         "db_today": "today",
         "db_ago": "%s ago",
         "unit_entry": "entry|entries|entries",
@@ -1645,6 +1665,7 @@ class LinkGuardPlugin(BasePlugin):
         self._sources = {}
         self._ages = {}
         self._db_ticked = 0.0
+        self._db_loading = False
         self._log = []
 
         self._step("database", self._load_database)
@@ -1717,31 +1738,69 @@ class LinkGuardPlugin(BasePlugin):
         ] + self._exception_rows() + [
 
             Header(text=phrase("hdr_stats")),
-            Text(text=phrase("stats_line", self._stat("stats_cleaned")),
-                 subtext=phrase("stats_sub", self._stat("stats_warned")),
-                 on_click=self._on_reset_stats_click),
-            Divider(text=phrase("stats_hint")),
+        ] + self._detail_row(
+            phrase("stats_line", self._stat("stats_cleaned")),
+            phrase("stats_detail", self._stat("stats_warned")),
+            phrase("stats_sub", self._stat("stats_warned")),
+            self._on_reset_stats_click,
+            caption=phrase("stats_hint"),
+        ) + [
 
             Header(text=phrase("db_title")),
             Switch(key="use_database", text=phrase("sw_database"), default=True,
                    subtext=phrase("sw_database_sub")),
-            Text(text=phrase("db_refresh"), subtext=self._database_status(),
-                 on_click=self._on_refresh_database_click),
+        ] + self._detail_row(
+            phrase("db_refresh"),
+            self._database_status(full=True),
+            self._database_status(),
+            self._on_refresh_database_click,
+        ) + [
 
             Header(text=phrase("hdr_updates")),
             Switch(key="check_updates", text=phrase("sw_updates"), default=True,
                    subtext=phrase("sw_updates_sub")),
             Text(text=phrase("btn_check_now"), subtext=phrase("version_line", __version__),
                  accent=True, on_click=self._on_check_updates_click),
-            Text(text=phrase("btn_repo"), subtext=phrase("btn_repo_sub"),
-                 on_click=self._on_repo_click),
-            Text(text=phrase("btn_chat"), subtext=phrase("btn_chat_sub"),
-                 on_click=self._on_chat_click),
+        ] + self._detail_row(
+            phrase("btn_repo"), phrase("btn_repo_detail"), phrase("btn_repo_sub"),
+            self._on_repo_click, divider=True,
+        ) + self._detail_row(
+            phrase("btn_chat"), phrase("btn_chat_detail"), phrase("btn_chat_sub"),
+            self._on_chat_click,
+        ) + [
 
             Divider(),
             Text(text=phrase("privacy_title"), subtext=phrase("read_more"),
                  on_click=self._on_privacy_note),
         ] + self._diagnostic_rows()
+
+    def _detail_row(self, title, detail, short, handler, caption=None, divider=False):
+        cell = self._detail_cell(title, detail, divider)
+        if cell is not None:
+            try:
+                return [Custom(view=cell, on_click=lambda *args: handler())]
+            except Exception as e:
+                self._debug("settings: своя строка не собралась: %s" % e)
+        rows = [Text(text=title, subtext=short, on_click=handler)]
+        if caption:
+            rows.append(Divider(text=caption))
+        return rows
+
+    def _detail_cell(self, title, detail, divider):
+        if Custom is None or TextDetailSettingsCell is None:
+            return None
+        try:
+            fragment = get_last_fragment()
+            activity = fragment.getParentActivity() if fragment is not None else None
+            if activity is None:
+                return None
+            cell = TextDetailSettingsCell(activity)
+            cell.setMultilineDetail(True)
+            cell.setTextAndValue(title, detail, bool(divider))
+            return cell
+        except Exception as e:
+            self._debug("settings: ячейка с переносом недоступна: %s" % e)
+            return None
 
     def _diagnostic_rows(self):
         if not DEBUG_BUILD:
@@ -2037,29 +2096,39 @@ class LinkGuardPlugin(BasePlugin):
         if getattr(self, "_cache", None) is not None:
             self._cache.clear()
         if enabled:
+            self._db_loading = True
             self._run_background(self._reenable_database)
 
     def _reenable_database(self):
-        database = read_database(self._database_path())
-        if database is None:
-            self._refresh_database(manual=True)
-            return
-        install_database(database)
-        if getattr(self, "_cache", None) is not None:
-            self._cache.clear()
-        self._debug("db: снова включена, взята копия с диска")
-        if self._due_for_refresh(database):
-            self._refresh_database(manual=False)
+        try:
+            database = read_database(self._database_path())
+            if database is None:
+                self._refresh_database(manual=True)
+                return
+            install_database(database)
+            if getattr(self, "_cache", None) is not None:
+                self._cache.clear()
+            self._debug("db: снова включена, взята копия с диска")
+            if self._due_for_refresh(database):
+                self._refresh_database(manual=False)
+        finally:
+            self._db_loading = False
+            loaded = active_database()
+            total = loaded.total if loaded is not None else 0
+            run_on_ui_thread(lambda: self._after_refresh(total, False))
 
-    def _database_status(self):
+    def _database_status(self, full=False):
         database = active_database()
         if not self._database_enabled():
             return phrase("db_status_off")
         if database is None:
+            if getattr(self, "_db_loading", False):
+                return phrase("db_status_loading")
             return phrase("db_status_none")
         days = database.age_days
         when = phrase("db_today") if days < 1 else phrase("db_ago", amount(days, "unit_day"))
-        return phrase("db_status", big_amount(database.total, "unit_entry"), when)
+        return phrase("db_status_full" if full else "db_status",
+                      big_amount(database.total, "unit_entry"), when)
 
     def _maybe_check_updates(self):
         if not self.get_setting("check_updates", True):
