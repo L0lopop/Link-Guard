@@ -1836,6 +1836,33 @@ check("возраст домена стоит в «Проверке ссылок
 check("пояснение про метки стоит в «Антитрекере»", tracker_at < tags_at < stats_at,
       (tracker_at, tags_at, stats_at))
 
+print("\nПодписи в настройках видны целиком")
+fit_plugin = lg.LinkGuardPlugin()
+fit_plugin.on_plugin_load()
+fit_plugin.set_setting("stats_cleaned", 123456)
+fit_plugin.set_setting("stats_warned", 123456)
+fit_plugin.set_setting("whitelist", "example.com")
+fit_plugin.set_setting("use_database", True)
+real_debug_build = lg.DEBUG_BUILD
+lg.DEBUG_BUILD = True
+for lang in ("ru", "en"):
+    lg.LANG = lang
+    for total, days in ((9876545, 12), (9876541, 0)):
+        lg.install_database(types.SimpleNamespace(age_days=days, total=total))
+        rows = fit_plugin.create_settings()
+        single_line = [row.subtext for row in rows
+                       if getattr(row, "subtext", None)
+                       and not isinstance(getattr(row, "default", None), bool)]
+        too_long = [text for text in single_line if len(text) > 34]
+        check("подписи строк влезают в одну строку (%s, %d дн.)" % (lang, days),
+              single_line and not too_long, too_long)
+lg.LANG = "ru"
+lg.DEBUG_BUILD = real_debug_build
+lg.install_database(None)
+check("подсказка про сброс счётчиков вынесена в подпись блока",
+      any(getattr(row, "text", None) == lg.phrase("stats_hint")
+          for row in fit_plugin.create_settings()))
+
 print("\nТексты не врут")
 for lang in ("ru", "en"):
     note = lg.STRINGS[lang]["privacy_note"]
