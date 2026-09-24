@@ -2,100 +2,104 @@
   <img src="assets/icon.png" width="128" alt="Link Guard">
 </p>
 
+<p align="center"><b>English</b> · <a href="README.ru.md">Русский</a></p>
+
 # Link Guard
 
-Плагин для **exteraGram** и **AyuGram**: разбирает ссылку до того, как вы по ней перейдёте, и вычищает трекеры.
+A plugin for **exteraGram** and **AyuGram** that checks a link before you open it and strips trackers out of it.
 
-Разбор ссылок выполняется на устройстве. База мошеннических сайтов приезжает готовым файлом, а какие ссылки вы открываете, не узнаёт никто.
+Links are analysed on your device. The scam site database arrives as a ready-made file, and nobody learns which links you open.
 
-## Что делает
+## What it does
 
-**Проверяет ссылку перед открытием.** Если всё в порядке — молча пропускает. Если нет — показывает разбор и даёт решить самому.
+**Checks a link before it opens.** If everything is fine, it stays out of your way. If not, it shows a breakdown and lets you decide.
 
-| Приём | Пример |
+| Trick | Example |
 |---|---|
-| Подмена домена через `@` | `sberbank.ru@phish.top/login` ведёт на `phish.top` |
-| Опечатка, в том числе переставленные буквы | `gogole.com`, `sberbamk.ru` |
-| Кириллица под латиницу | `sbеrbank.ru` с русской «е» |
-| Punycode | `xn--80ak6aa92e.com` показывается в читаемом виде |
-| Бренд в поддомене | `gosuslugi.ru.verify-account.cyou` |
-| Чужое имя с приставкой | `sberbank-shop.ru`, `tinkoffshop.com`, `vtb-online.info` |
-| Опасные схемы | `javascript:`, `data:`, `file:`, `intent:` |
-| Установочные файлы | ссылка на `.apk`, `.exe`, `.scr` |
-| Прочее | IP вместо домена, нестандартный порт, мошеннические зоны, слова-приманки |
+| Fake domain with `@` | `sberbank.ru@phish.top/login` actually leads to `phish.top` |
+| Typos, including swapped letters | `gogole.com`, `sberbamk.ru` |
+| Cyrillic letters posing as Latin | `sbеrbank.ru` with a Cyrillic «е» |
+| Punycode | `xn--80ak6aa92e.com` is shown in readable form |
+| Brand in a subdomain | `gosuslugi.ru.verify-account.cyou` |
+| Brand name with extras | `sberbank-shop.ru`, `tinkoffshop.com`, `vtb-online.info` |
+| Dangerous schemes | `javascript:`, `data:`, `file:`, `intent:` |
+| Installer files | links to `.apk`, `.exe`, `.scr` |
+| Other | an IP address instead of a domain, a non-standard port, scam-heavy zones, bait words |
 
-**Знает мошеннические сайты в лицо.** База из одиннадцати публичных списков — больше 3,6 млн адресов — собирается в этом репозитории каждую ночь и приезжает готовым файлом. Проверка идёт на устройстве: ни один адрес наружу не уходит.
+**Knows scam sites by name.** A database built from eleven public lists — over 3 million addresses — is rebuilt in this repository every night and delivered as a ready-made file. Lookups happen on the device: no address ever leaves it.
 
-**Знает свежерегистрированные домены.** Адрес, заведённый меньше десяти дней назад и носящий чужое имя, — почти всегда мошенничество, а в публичные списки он попадёт лишь через несколько дней.
+**Knows freshly registered domains.** An address registered less than ten days ago that carries someone else's name is almost always a scam, and public lists will only catch it days later.
 
-**Считает репутацию доменных зон, а не ведёт список вручную.** В зоне `digital` мошеннических сайтов в двести с лишним раз больше, чем известных, в `xyz` — примерно в сто сорок. При этом в `com` их больше всех по числу, но на фоне настоящих сайтов это капля, поэтому `com` молчит.
+**Rates domain zones instead of relying on a hand-made list.** In `.digital` there are hundreds of scam sites for every known one, in `.xyz` more than a hundred. `.com` has the most scam sites by count, but next to the real ones they are a drop in the ocean, so `.com` stays quiet.
 
-**Ловит подмену подписи.** Если в сообщении ссылка подписана как `sberbank.ru`, а ведёт на другой домен, плагин скажет об этом прямо в разборе.
+**Catches disguised link labels.** If a message labels a link as `sberbank.ru` while it leads somewhere else, the breakdown says so.
 
-**Чистит трекеры.** Больше 40 параметров точным списком (`fbclid`, `gclid`, `yclid`, `erid`, `msclkid` и другие) плюс префиксы `utm_*`, `pk_*`, `hsa_*`, `mtm_*`, `matomo_*`, `piwik_*`. Работает и при переходе, и в ваших исходящих сообщениях. Агрессивный режим дополнительно снимает `ref`, `si`, `spm`, `from` — по умолчанию выключен, потому что редкие сайты на них завязаны.
+**Strips trackers.** Over 40 parameters by exact name (`fbclid`, `gclid`, `yclid`, `erid`, `msclkid` and more) plus the `utm_*`, `pk_*`, `hsa_*`, `mtm_*`, `matomo_*`, `piwik_*` prefixes. Works both when you open a link and in your outgoing messages. Everything else in the link stays untouched. Aggressive mode also removes `ref`, `si`, `spm`, `from` — it is off by default, because a few sites depend on them.
 
-**Разворачивает короткие ссылки.** `bit.ly`, `clck.ru`, `vk.cc` и ещё три десятка сервисов: показывает конечный адрес и число редиректов, конечный адрес тоже проходит полную проверку.
+**Expands short links.** `bit.ly`, `clck.ru`, `vk.cc` and about thirty other services: shows the final address and the number of redirects, runs the final address through the full check and strips its trackers too.
 
-**Два пункта в меню сообщения** — «Проверить ссылки» (разбирает все ссылки разом, включая спрятанные под текстом) и «Копировать без трекеров».
+**Two items in the message menu** — «Check links» (analyses every link at once, including those hidden under text) and «Copy without trackers».
 
-**Знает, откуда ссылка.** Из канала или от незнакомца — проверяет строже, от вашего контакта или из «Избранного» — мягче. Адрес в домашней сети не считается угрозой.
+**Knows where a link came from.** Links from a channel or a stranger get a stricter check, links from your contacts or «Saved Messages» a gentler one. Addresses on your home network are not treated as a threat.
 
-**Умеет узнавать возраст домена.** Свежая регистрация вместе с имитацией известного бренда — почти всегда мошенничество. Выключено по умолчанию: запрос уходит на сторонний сервис rdap.org.
+**Can look up a domain's age.** A fresh registration plus an imitation of a well-known brand is almost always fraud. Off by default: the request goes to the third-party rdap.org service.
 
-## Как база избегает ложных тревог
+**Speaks English and Russian.** The interface follows your Telegram language, and you can pick one manually in the settings.
 
-Публичные списки регулярно ошибаются, поэтому база их не копирует вслепую.
+## How the database avoids false alarms
 
-- **Пятьдесят тысяч самых посещаемых сайтов** в базу не попадают, даже если какой-то список внёс туда `github.com` или `dropbox.com`.
-- **На двести тысяч самых посещаемых** не срабатывают догадки по признакам — зона, слова-приманки, длина имени. Поэтому официальные короткие ссылки магазинов вроде `ali.click` не выглядят подозрительно. Но если такой сайт всё же есть в базе, база важнее популярности.
-- **Общие адреса сервисов** — `raw.githubusercontent.com`, `cdn.jsdelivr.net`, `storage.googleapis.com` — не помечаются. Списки ссылок называют хост, на котором лежал вредоносный файл, хотя этим хостом пользуются все.
-- **Площадки, раздающие адреса всем желающим,** распознаются отдельно: мошеннический сайт на них помечается поимённо, а сама площадка нет.
-- **Склеенное имя** считается подделкой, только если второе слово — приманка: `sberbankshop` ловится, `googlefonts` нет.
+Public lists make mistakes regularly, so the database does not copy them blindly.
 
-## Настройки
+- **The 50,000 most visited sites** never get into the database, even if some list added `github.com` or `dropbox.com`.
+- **The 200,000 most visited sites** are exempt from guesswork based on the zone, bait words or name length. That is why official short links of online stores such as `ali.click` do not look suspicious. If such a site does get into the database, the database wins over popularity.
+- **Shared service addresses** such as `raw.githubusercontent.com`, `cdn.jsdelivr.net`, `storage.googleapis.com` are never flagged. Link lists name the host where a malicious file was found, but that host is shared by everyone.
+- **Hosting platforms that hand out addresses to anyone** are recognised separately: a scam site on them is flagged by name, the platform itself is not.
+- **A name glued to another word** counts as a fake only if that word is bait: `sberbankshop` is caught, `googlefonts` is not.
 
-Показывать разбор можно при любой находке анализатора или для каждой ссылки подряд. Доверенные домены живут отдельным списком: добавляются полем с кнопкой, удаляются долгим нажатием. В диалоге опасной ссылки главная кнопка — «Отмена», чтобы случайный тап не открывал фишинг.
+## Settings
 
-Статистика показывает, сколько меток вырезано и сколько предупреждений показано; счётчики сбрасываются нажатием.
+The breakdown can appear on any finding or for every link. Trusted domains live in their own list: add them with a field and a button, remove them with a long press. In the dialog for a dangerous link the main button is «Cancel», so a stray tap never opens a phishing page.
 
-В разделе «Обновления» — проверка новой версии вручную, кнопка на исходный код и кнопка на чат плагина.
+Statistics show how many tags were removed and how many warnings were shown; tap the counters to reset them.
 
-## Установка
+The «Updates» section has a manual update check and buttons to the source code and the plugin chat. The interface language is chosen at the very bottom.
 
-1. Скачайте [`src/link_guard.plugin`](src/link_guard.plugin) или последнюю версию со страницы [релизов](https://github.com/L0lopop/Link-Guard/releases/latest).
-2. Отправьте файл самому себе в «Избранное».
-3. Тапните по нему в чате → «Установить» → «Включить после установки».
+## Installation
 
-Требуется exteraGram или AyuGram версии 12.1.1 или новее. В более старых сборках движок плагинов работает в урезанном режиме: долгое нажатие в настройках там не поддерживается, а без него не удалить доверенный домен.
+1. Download [`src/link_guard.plugin`](src/link_guard.plugin) or the latest version from the [releases](https://github.com/L0lopop/Link-Guard/releases/latest) page.
+2. Send the file to yourself in «Saved Messages».
+3. Tap it in the chat → «Install» → «Enable after installation».
 
-## Что уходит в сеть
+Requires exteraGram or AyuGram 12.1.1 or newer. Older builds run the plugin engine in a reduced mode: long presses in settings are not supported there, and without them a trusted domain cannot be removed.
 
-Разбор ссылок целиком локальный. Наружу плагин обращается в четырёх случаях, и каждый отключается тумблером в настройках:
+## What goes online
 
-- **разворачивание короткой ссылки** — HEAD-запрос по самой ссылке, чтобы узнать конечный адрес;
-- **проверка обновлений** — раз в шесть часов читает `update.json` из этого репозитория; при согласии скачивает файл и открывает штатный экран установки, проверив, что это действительно Link Guard;
-- **база мошеннических сайтов** — раз в три часа читает из релиза этого репозитория описание сборки размером около килобайта и скачивает файл целиком, только если база действительно обновилась; какие адреса вы проверяете, при этом не сообщается никому;
-- **возраст домена** — только если вы включите этот тумблер: адрес проверяемого домена уходит на rdap.org.
+Link analysis is entirely local. The plugin goes online in four cases, and each one has its own switch in the settings:
 
-Ни содержимое переписки, ни ваши ссылки никуда не передаются.
+- **expanding a short link** — a HEAD request to the link itself to learn the final address;
+- **checking for updates** — every six hours it reads `update.json` from this repository; if you agree, it downloads the file and opens the standard install screen after making sure it really is Link Guard;
+- **the scam site database** — every three hours it reads a build description of about a kilobyte from this repository's release and downloads the whole file only if the database has actually changed; which addresses you check is never reported to anyone;
+- **domain age** — only if you turn it on: the domain being checked is sent to rdap.org.
 
-## Разработка
+Neither your chats nor your links are sent anywhere.
+
+## Development
 
 ```bash
 python tests/test_link_guard.py
 python scripts/build_db.py && python tests/test_db_format.py db
 ```
 
-Первый набор подменяет Android-модули заглушками и прогоняет логику целиком: разбор ссылок, перехват перехода, чистку исходящих, проверку обновлений, работу с базой и совместимость с урезанным SDK. Отдельно контролируется точность — выборка нормальных ссылок должна проходить без единого предупреждения.
+The first suite replaces Android modules with stubs and runs the whole logic: link analysis, opening interception, cleaning outgoing messages, update checks, the database, both interface languages and compatibility with a reduced SDK. Accuracy is checked separately — a sample of ordinary links must pass without a single warning.
 
-Второй собирает настоящую базу из публичных списков и проверяет её на реальных данных: что формат читается, что тысяча посещаемых сайтов не вызывает тревог, что площадки общего хостинга и общие адреса сервисов не блокируются целиком. Выгрузки abuse.ch требуют бесплатного ключа в переменной `ABUSE_CH_KEY`; без него эти два источника пропускаются.
+The second suite builds the real database from public lists and checks it on real data: that the format reads correctly, that a thousand popular sites raise no alarms, and that shared hosting platforms and shared service addresses are not blocked as a whole. The abuse.ch feeds need a free key in the `ABUSE_CH_KEY` variable; without it those two sources are skipped.
 
-Источники базы: [HaGeZi](https://github.com/hagezi/dns-blocklists), [Phishing Army](https://phishing.army), [Phishing.Database](https://github.com/Phishing-Database/Phishing.Database), [CERT.PL](https://cert.pl), [The Block List Project](https://github.com/blocklistproject/Lists), [malware-filter](https://gitlab.com/malware-filter), [phishunt](https://phishunt.io), [URLhaus](https://urlhaus.abuse.ch) и [ThreatFox](https://threatfox.abuse.ch). Свежерегистрированные домены — [cenk/nrd](https://github.com/cenk/nrd), список посещаемых сайтов — [Tranco](https://tranco-list.eu), разделение доменов — [Public Suffix List](https://publicsuffix.org).
+Database sources: [HaGeZi](https://github.com/hagezi/dns-blocklists), [Phishing Army](https://phishing.army), [Phishing.Database](https://github.com/Phishing-Database/Phishing.Database), [CERT.PL](https://cert.pl), [The Block List Project](https://github.com/blocklistproject/Lists), [malware-filter](https://gitlab.com/malware-filter), [phishunt](https://phishunt.io), [URLhaus](https://urlhaus.abuse.ch) and [ThreatFox](https://threatfox.abuse.ch). Freshly registered domains come from [cenk/nrd](https://github.com/cenk/nrd), popular sites from [Tranco](https://tranco-list.eu), domain splitting from the [Public Suffix List](https://publicsuffix.org).
 
-## Связь
+## Contact
 
-Новости, вопросы и предложения — в чате плагина: [t.me/kringplugins](https://t.me/kringplugins).
+News, questions and ideas — in the plugin chat: [t.me/kringplugins](https://t.me/kringplugins).
 
-## Лицензия
+## License
 
-MIT — см. [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

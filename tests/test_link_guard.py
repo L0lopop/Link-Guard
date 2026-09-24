@@ -1962,6 +1962,101 @@ re_plugin.set_setting = real_re_set
 os.remove(re_path)
 lg.install_database(None)
 
+print("\nАнглийский язык")
+ru_keys, en_keys = set(lg.STRINGS["ru"]), set(lg.STRINGS["en"])
+check("у каждой русской строки есть английская", ru_keys == en_keys,
+      sorted(ru_keys ^ en_keys))
+check("в английских строках нет «ёлочек»",
+      not [k for k, v in lg.STRINGS["en"].items() if "«" in v or "»" in v])
+check("у английских строк столько же подстановок, сколько у русских",
+      not [k for k in ru_keys if lg.STRINGS["ru"][k].count("%s")
+           != lg.STRINGS["en"][k].count("%s")])
+
+lg.LANG = "en"
+check("по-английски 21 — это days, а не day",
+      lg.plural_form(lg.phrase("unit_day"), 21) == "days")
+check("по-английски 1 — day", lg.plural_form(lg.phrase("unit_day"), 1) == "day")
+check("размер базы по-английски: 3,664,881 entries",
+      lg.big_amount(3664881, "unit_entry") == "3,664,881 entries",
+      lg.big_amount(3664881, "unit_entry"))
+check("возраст домена по-английски читается",
+      lg.phrase("f_age_new", lg.human_age(0)) == "The domain is only a few hours old",
+      lg.phrase("f_age_new", lg.human_age(0)))
+lg.LANG = "ru"
+check("по-русски 21 — день", lg.plural_form(lg.phrase("unit_day"), 21) == "день")
+check("по-русски 3 664 881 запись", lg.big_amount(3664881, "unit_entry") == "3 664 881 запись")
+
+
+class FakeLocaleInfo:
+
+    def __init__(self, code):
+        self.code = code
+
+    def getLangCode(self):
+        return self.code
+
+
+def locale_stub(code):
+    controller = types.SimpleNamespace(
+        getInstance=lambda: types.SimpleNamespace(
+            getCurrentLocaleInfo=lambda: FakeLocaleInfo(code)))
+
+    def finder(name):
+        if name.endswith("LocaleController"):
+            return controller
+        return None
+    return finder
+
+
+real_find_class = lg.find_class
+for code, expected in (("ru", "ru"), ("en", "en"), ("pt-br", "en"), ("uk", "en")):
+    lg.find_class = locale_stub(code)
+    check("Telegram на «%s» — плагин на %s" % (code, expected),
+          lg.pick_language("auto") == expected, lg.pick_language("auto"))
+lg.find_class = locale_stub("ru")
+check("ручной выбор English перекрывает русский Telegram",
+      lg.pick_language("en") == "en")
+lg.find_class = lambda name: None
+check("язык не определился — остаётся прежний",
+      lg.pick_language("auto") is None and lg.apply_language("auto") == lg.LANG)
+lg.find_class = real_find_class
+
+lang_plugin = lg.LinkGuardPlugin()
+lang_plugin.on_plugin_load()
+rows = lang_plugin.create_settings()
+selector = [row for row in rows if getattr(row, "key", None) == "ui_lang"]
+check("в настройках есть выбор языка", len(selector) == 1)
+if selector:
+    check("варианты: как в Telegram, русский, английский",
+          selector[0].items == [lg.phrase("lang_auto"), "Русский", "English"],
+          selector[0].items)
+    redraw = []
+    real_lang_set = lang_plugin.set_setting
+
+    def watch_lang(key, value, reload_settings=False):
+        if reload_settings:
+            redraw.append(key)
+        return real_lang_set(key, value, reload_settings)
+
+    lang_plugin.set_setting = watch_lang
+    selector[0].on_change(2)
+    check("выбран English — интерфейс переключился", lg.LANG == "en", lg.LANG)
+    check("пункты меню сообщения переведены",
+          getattr(lang_plugin._menu_check, "text", None) == "Check links",
+          getattr(lang_plugin._menu_check, "text", None))
+    check("экран настроек перерисован", "ui_lang" in redraw, redraw)
+    check("выбор запомнен", lang_plugin._language_choice() == "en")
+    check("причина неудачной загрузки по-английски",
+          lg.phrase("dl_not_ours") == "the file is not Link Guard")
+    selector[0].on_change(1)
+    check("обратно на русский", lg.LANG == "ru"
+          and getattr(lang_plugin._menu_check, "text", None) == "Проверить ссылки")
+    lang_plugin.set_setting = real_lang_set
+lang_plugin.set_setting("ui_lang", 0)
+lg.LANG = "ru"
+check("описание плагина на английском",
+      lg.__description__.startswith("Checks links before you open them"))
+
 print("\nТексты не врут")
 for lang in ("ru", "en"):
     note = lg.STRINGS[lang]["privacy_note"]
