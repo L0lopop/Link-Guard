@@ -1,6 +1,11 @@
 __id__ = "link_guard"
 __name__ = "Link Guard"
-__description__ = "Checks links before you open them: reveals the real domain, catches phishing and look-alike characters, strips trackers"
+__description__ = (
+    "Проверяет ссылки перед переходом: показывает настоящий домен, ловит фишинг "
+    "и подмену символов, вычищает трекеры.\n\n"
+    "Checks links before you open them: reveals the real domain, catches phishing "
+    "and look-alike characters, strips trackers."
+)
 __author__ = "@Robobloxi"
 __version__ = "1.7.0"
 __icon__ = "likguar/0"

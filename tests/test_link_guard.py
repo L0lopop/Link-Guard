@@ -2054,8 +2054,22 @@ if selector:
     lang_plugin.set_setting = real_lang_set
 lang_plugin.set_setting("ui_lang", 0)
 lg.LANG = "ru"
-check("описание плагина на английском",
-      lg.__description__.startswith("Checks links before you open them"))
+check("описание плагина на двух языках",
+      lg.__description__.startswith("Проверяет ссылки перед переходом")
+      and "\n\nChecks links before you open them" in lg.__description__,
+      lg.__description__)
+
+import ast as _ast
+with open(PLUGIN, encoding="utf-8") as _handle:
+    _meta = {node.targets[0].id: node.value
+             for node in _ast.parse(_handle.read()).body
+             if isinstance(node, _ast.Assign) and isinstance(node.targets[0], _ast.Name)
+             and node.targets[0].id.startswith("__")}
+check("загрузчик клиента прочитает метаданные как простые строки",
+      all(isinstance(_meta.get(key), _ast.Constant) and isinstance(_meta[key].value, str)
+          for key in ("__id__", "__name__", "__description__", "__author__",
+                      "__version__", "__icon__", "__app_version__")),
+      {key: type(value).__name__ for key, value in _meta.items()})
 
 print("\nТексты не врут")
 for lang in ("ru", "en"):
