@@ -1,54 +1,138 @@
 {
-  "built": "2026-09-12 02:36 UTC",
+  "built": "2026-09-30 08:47 UTC",
   "feeds": {
     "hagezi": {
       "ok": true,
-      "accepted": 2405375,
-      "last_modified": null
+      "accepted": 2371634,
+      "last_modified": null,
+      "fingerprint": "b3baf4af5a9bd51514643dc2e2e3d104f40b5ffc28dc3cf1013d65cc7fee3aa9",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
     },
     "army": {
       "ok": true,
-      "accepted": 154710,
-      "last_modified": "Fri, 11 Sep 2026 22:00:09 GMT"
+      "accepted": 146254,
+      "last_modified": "Wed, 30 Sep 2026 04:00:16 GMT",
+      "fingerprint": "0e303c58d19554040aa802672282a6570c5dd957b816ecd0c9cad212d2154ffa",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
     },
     "phishdb": {
       "ok": true,
-      "accepted": 386197,
-      "last_modified": null
+      "accepted": 386447,
+      "last_modified": null,
+      "fingerprint": "4c720644110310d7e84c369fdd978ae161d49f1e930dde676843c63ef25a276a",
+      "last_changed": "2026-09-29",
+      "frozen_days": 1
     },
     "certpl": {
       "ok": true,
-      "accepted": 135568,
-      "last_modified": "Sat, 12 Sep 2026 02:35:07 GMT"
+      "accepted": 129145,
+      "last_modified": "Wed, 30 Sep 2026 08:45:07 GMT",
+      "fingerprint": "b018dd776c14a4f26a63470c9848717025bcd8229b2f14d7dfd84ed7f8c2a72d",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
     },
     "blocklistproject": {
       "ok": true,
-      "accepted": 190215,
-      "last_modified": null
+      "accepted": 120474,
+      "last_modified": null,
+      "fingerprint": "c7c499644dc01156770f6ef80aa305ac40888dfeceb4a3491f64dbf9310be5a4",
+      "last_changed": "2026-09-12",
+      "frozen_days": 18
     },
     "malware-filter": {
       "ok": true,
-      "accepted": 38985,
-      "last_modified": "Sat, 12 Sep 2026 00:32:14 GMT"
+      "accepted": 40560,
+      "last_modified": "Wed, 30 Sep 2026 00:32:08 GMT",
+      "fingerprint": "2e54b37bb39a68e003a1ccef16a0c983e6b3d0c51fe31fb0cc939778f873ed62",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
     },
     "urlhaus": {
       "ok": true,
-      "accepted": 8443,
-      "last_modified": "Sat, 12 Sep 2026 02:30:55 GMT"
+      "accepted": 540,
+      "last_modified": "Wed, 30 Sep 2026 08:46:11 GMT",
+      "fingerprint": "a8d91406920f9cde3e67b6b931eb4fa3f67e880f6bbee447ec2b6000a31a893d",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
+    },
+    "phishunt": {
+      "ok": true,
+      "accepted": 794,
+      "last_modified": "Wed, 30 Sep 2026 08:33:23 GMT",
+      "fingerprint": "ccb876942232a192f09c854283fad4b6a32cda14dc52e06440999461676432fa",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
+    },
+    "phishdb-links": {
+      "ok": true,
+      "accepted": 427380,
+      "last_modified": null,
+      "fingerprint": "12de3f2e2d1cd433c2b585c41fe03f020446784808bd0a4842cbd1943a024e0f",
+      "last_changed": "2026-09-18",
+      "frozen_days": 12
+    },
+    "urlhaus-full": {
+      "ok": true,
+      "accepted": 3453,
+      "last_modified": "Wed, 30 Sep 2026 08:40:22 GMT",
+      "fingerprint": "cfca019f1df188a0d45a3d3a3b4209f7cafba9b0cf00bfaad15131c7af326e81",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
+    },
+    "threatfox": {
+      "ok": true,
+      "accepted": 48260,
+      "last_modified": "Wed, 30 Sep 2026 07:42:21 GMT",
+      "fingerprint": "4f6446ae49bc771cea0eed10e9180957d1c32cd1e8d678048ff0346cd46a38f9",
+      "last_changed": "2026-09-30",
+      "frozen_days": 0
     }
   },
   "full": {
-    "entries": 2984804,
-    "bytes": 9211242,
+    "entries": 3324578,
+    "bytes": 10695417,
     "hash_bits": 40
   },
   "whitelist": {
-    "entries": 50000,
+    "entries": 200000,
     "hash_bits": 36
   },
+  "fresh_10_days": 4244,
+  "fresh_30_days": 7950,
   "brands": 1000,
-  "platforms": 2635,
-  "suffixes": 5333,
-  "removed_by_whitelist": 184,
-  "removed_popular_subdomains": 3762
+  "platforms": 2796,
+  "suffixes": 5335,
+  "zones": 25,
+  "worst_zones": [
+    "gq level=3 плохих=3339 известных=6",
+    "tk level=3 плохих=7585 известных=22",
+    "cf level=3 плохих=3588 известных=10",
+    "casa level=3 плохих=19996 известных=76",
+    "digital level=3 плохих=88149 известных=404",
+    "ga level=3 плохих=4493 известных=23",
+    "ml level=3 плохих=5429 известных=32",
+    "xyz level=3 плохих=838644 известных=6983",
+    "click level=3 плохих=115422 известных=1238",
+    "forum level=3 плохих=5953 известных=73",
+    "sbs level=3 плохих=38955 известных=551",
+    "garden level=3 плохих=2071 известных=34",
+    "asia level=2 плохих=23866 известных=483",
+    "pics level=2 плохих=8095 известных=175",
+    "help level=2 плохих=5725 известных=147",
+    "vu level=2 плохих=3063 известных=87",
+    "shop level=2 плохих=169481 известных=5057",
+    "cyou level=2 плохих=13542 известных=408",
+    "luxe level=2 плохих=230 известных=6",
+    "gifts level=2 плохих=324 известных=10",
+    "xin level=2 плохих=1201 известных=40",
+    "surf level=2 плохих=1758 известных=60",
+    "sn level=2 плохих=1865 известных=68",
+    "page level=2 плохих=3100 известных=115",
+    "dev level=2 плохих=40149 известных=1530"
+  ],
+  "removed_by_whitelist": 277,
+  "removed_popular_subdomains": 3927,
+  "removed_service_hosts": 10
 }
