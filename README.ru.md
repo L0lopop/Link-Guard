@@ -100,6 +100,16 @@ python scripts/build_db.py && python tests/test_db_format.py db
 
 Новости, вопросы и предложения — в чате плагина: [t.me/kringplugins](https://t.me/kringplugins).
 
+## История Звёзд 
+
+<a href="https://www.star-history.com/?repos=l0lopop%2Flink-guard&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=l0lopop/link-guard&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=l0lopop/link-guard&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=l0lopop/link-guard&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE).
